@@ -1,0 +1,8 @@
+node_modules/
+client/dist/
+.env
+
+# Local data — these live on the persistent volume in production
+server/scope-tool.db
+server/uploads/
+server/outputs/
