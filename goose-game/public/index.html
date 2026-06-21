@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Quit Goosin Around! 🪿</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- LOBBY -->
+    <section id="lobby" class="screen">
+      <h1>Quit Goosin <span>Around!</span> 🪿</h1>
+      <p class="tag">a stupid card game about geese versus a bad little kid, basically</p>
+
+      <div class="lobby-card">
+        <label>Yer goose name
+          <input id="nameInput" maxlength="20" placeholder="Sir Honks-a-lot" />
+        </label>
+        <div class="row">
+          <button id="createBtn" class="primary">Create a Pond</button>
+        </div>
+        <div class="or">— or —</div>
+        <div class="row">
+          <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input" />
+          <button id="joinBtn">Join</button>
+        </div>
+        <p id="lobbyErr" class="err"></p>
+      </div>
+    </section>
+
+    <!-- WAITING ROOM -->
+    <section id="waiting" class="screen hidden">
+      <h2>Pond <span id="roomCode" class="codepill"></span></h2>
+      <p class="tag">Share the code. The silliest goose goes first (we pick at random).</p>
+      <ul id="memberList" class="members"></ul>
+      <label class="check"><input type="checkbox" id="boutaRule" checked /> Use the "I'm bouta goose!" rule (must announce at 17 to win)</label>
+      <div class="row">
+        <button id="startBtn" class="primary">Start Goosin'</button>
+      </div>
+      <p id="waitHint" class="tag"></p>
+    </section>
+
+    <!-- GAME -->
+    <section id="game" class="screen hidden">
+      <header class="topbar">
+        <div class="piles">
+          <div class="pile" id="gooseDraw"><span class="pile-n">68</span><span class="pile-l">Goose Deck</span></div>
+          <div class="pile wild" id="wildDraw"><span class="pile-n">22</span><span class="pile-l">Wild Market</span></div>
+        </div>
+        <div id="turnBanner" class="turn-banner"></div>
+        <div class="piles">
+          <div class="pile dim" id="gooseDiscard"><span class="pile-n">0</span><span class="pile-l">Discard</span></div>
+        </div>
+      </header>
+
+      <div id="opponents" class="opponents"></div>
+
+      <div id="prompt" class="prompt hidden"></div>
+
+      <div class="myarea">
+        <div class="myhead">
+          <span id="myName" class="myname"></span>
+          <span id="myScore" class="scorepill">0 / 21</span>
+          <span id="myAnnounce" class="announce hidden">BOUTA GOOSE!</span>
+        </div>
+        <div id="myWild" class="hand wildhand"></div>
+        <div id="myRegular" class="hand"></div>
+        <div id="controls" class="controls"></div>
+      </div>
+
+      <aside class="side">
+        <div id="log" class="log"></div>
+        <div class="chatbox">
+          <div id="chat" class="chat"></div>
+          <div class="row">
+            <input id="chatInput" placeholder="say sum'n…" maxlength="200" />
+            <button id="chatSend">Honk</button>
+          </div>
+        </div>
+      </aside>
+    </section>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script type="module" src="game.js"></script>
+</body>
+</html>
