@@ -21,13 +21,14 @@ const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' }
 const artStatus = {}; // kind -> 'ok' | 'missing' | 'pending'
 const artUrl = {};    // kind -> resolved url once found
 const ART_EXTS = ['png', 'PNG', 'jpg', 'jpeg', 'JPG', 'webp'];
+const ART_BUST = Date.now(); // unique per page load → never reuse a stale image
 function probeArt(kind) {
   if (artStatus[kind]) return;
   artStatus[kind] = 'pending';
   let i = 0;
   const tryNext = () => {
     if (i >= ART_EXTS.length) { artStatus[kind] = 'missing'; return; }
-    const url = `cards/${kind}.${ART_EXTS[i++]}`;
+    const url = `cards/${kind}.${ART_EXTS[i++]}?v=${ART_BUST}`;
     const img = new Image();
     img.onload = () => { artUrl[kind] = url; artStatus[kind] = 'ok'; rerender(); };
     img.onerror = tryNext;

@@ -30,7 +30,12 @@ const httpServer = http.createServer((req, res) => {
 
   fs.readFile(filePath, (e, data) => {
     if (e) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream' });
+    // Never let the browser serve a stale copy — so edited/resized art and
+    // updated client code always show on refresh.
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+    });
     res.end(data);
   });
 });
