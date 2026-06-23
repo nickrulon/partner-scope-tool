@@ -106,7 +106,10 @@ function applyPile(elId, count, backKind) {
   const ok = artStatus[backKind] === 'ok' && count > 0;
   el.classList.toggle('has-back', ok);
   el.classList.toggle('empty', count === 0);
+  // Set sizing inline so the .pile.wild gradient rule can't reset it to auto.
   el.style.backgroundImage = ok ? `url(${artUrl[backKind]})` : '';
+  el.style.backgroundSize = ok ? 'cover' : '';
+  el.style.backgroundPosition = ok ? 'center' : '';
 }
 
 function renderGame() {
@@ -183,9 +186,13 @@ function cardEl(card, selectable) {
   const meta = cardMeta[card.kind] || { name: card.kind, points: 0, color: '#444' };
   const el = document.createElement('div');
   el.className = 'card' + (selectable ? ' selectable' : '');
-  el.style.background = meta.color;
+  // Use backgroundColor (not the `background` shorthand) so we don't clobber
+  // the CSS `background-size: cover`; set sizing inline to be bulletproof.
+  el.style.backgroundColor = meta.color;
   if (artStatus[card.kind] === 'ok') {
     el.style.backgroundImage = `url(${artUrl[card.kind]})`;
+    el.style.backgroundSize = 'cover';
+    el.style.backgroundPosition = 'center';
   }
   const showText = artStatus[card.kind] !== 'ok';
   el.innerHTML =
