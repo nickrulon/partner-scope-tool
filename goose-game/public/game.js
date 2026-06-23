@@ -12,15 +12,28 @@ let ws, cardMeta = {}, room = null, view = null;
 let tradeMode = false, tradeSel = new Set();
 let targetMode = null; // { action, response? } awaiting an opponent click
 
-// --- art existence cache: only try each image once ---
+// Card-back art for the draw piles. Drop these PNGs in public/cards/ and the
+// piles render as a stack of the backs; until then they show a plain pile.
+const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' };
+
+// --- art existence cache: try each image once, resolving the real extension
+// so GOOSE.png / GOOSE.PNG / GOOSE.jpg all "just work" cross-platform. ---
 const artStatus = {}; // kind -> 'ok' | 'missing' | 'pending'
+const artUrl = {};    // kind -> resolved url once found
+const ART_EXTS = ['png', 'PNG', 'jpg', 'jpeg', 'JPG', 'webp'];
 function probeArt(kind) {
   if (artStatus[kind]) return;
   artStatus[kind] = 'pending';
-  const img = new Image();
-  img.onload = () => { artStatus[kind] = 'ok'; rerender(); };
-  img.onerror = () => { artStatus[kind] = 'missing'; };
-  img.src = `cards/${kind}.png`;
+  let i = 0;
+  const tryNext = () => {
+    if (i >= ART_EXTS.length) { artStatus[kind] = 'missing'; return; }
+    const url = `cards/${kind}.${ART_EXTS[i++]}`;
+    const img = new Image();
+    img.onload = () => { artUrl[kind] = url; artStatus[kind] = 'ok'; rerender(); };
+    img.onerror = tryNext;
+    img.src = url;
+  };
+  tryNext();
 }
 
 // --- connection ----------------------------------------------------------
@@ -30,7 +43,7 @@ function connect() {
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.onmessage = (ev) => {
     const { type, payload } = JSON.parse(ev.data);
-    if (type === 'cardMeta') { cardMeta = payload; Object.keys(cardMeta).forEach(probeArt); }
+    if (type === 'cardMeta') { cardMeta = payload; Object.keys(cardMeta).forEach(probeArt); Object.values(PILE_BACKS).forEach(probeArt); }
     else if (type === 'joined') { room = { code: payload.code, hostId: payload.hostId }; }
     else if (type === 'state') { view = payload; render(); }
     else if (type === 'error') { toast(payload.message); $('lobbyErr').textContent = payload.message; }
@@ -86,11 +99,20 @@ function renderWaiting() {
 function me() { return view.game.players.find((p) => p.id === playerId); }
 function isMyTurn() { return view.game.turnPlayerId === playerId; }
 
+function applyPile(elId, count, backKind) {
+  const el = $(elId);
+  el.querySelector('.pile-n').textContent = count;
+  const ok = artStatus[backKind] === 'ok' && count > 0;
+  el.classList.toggle('has-back', ok);
+  el.classList.toggle('empty', count === 0);
+  el.style.backgroundImage = ok ? `url(${artUrl[backKind]})` : '';
+}
+
 function renderGame() {
   const g = view.game;
-  // piles
-  $('gooseDraw').querySelector('.pile-n').textContent = g.gooseDrawCount;
-  $('wildDraw').querySelector('.pile-n').textContent = g.wildDrawCount;
+  // piles — draw piles show your card-back art as a stack
+  applyPile('gooseDraw', g.gooseDrawCount, PILE_BACKS.gooseDraw);
+  applyPile('wildDraw', g.wildDrawCount, PILE_BACKS.wildDraw);
   $('gooseDiscard').querySelector('.pile-n').textContent = g.gooseDiscardCount;
 
   // turn banner
@@ -162,7 +184,7 @@ function cardEl(card, selectable) {
   el.className = 'card' + (selectable ? ' selectable' : '');
   el.style.background = meta.color;
   if (artStatus[card.kind] === 'ok') {
-    el.style.backgroundImage = `url(cards/${card.kind}.png)`;
+    el.style.backgroundImage = `url(${artUrl[card.kind]})`;
   }
   const showText = artStatus[card.kind] !== 'ok';
   el.innerHTML =

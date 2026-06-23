@@ -14,6 +14,20 @@ goose-game/public/cards/LAWN_MOWER.png
 goose-game/public/cards/GREAT_HONKEROR.png
 ```
 
+## Card backs (the draw piles)
+
+Two extra files render the draw piles as a stack of card backs:
+
+```
+goose-game/public/cards/GOOSE_CARD_BACK.png   # the Goose deck pile
+goose-game/public/cards/WILD_GOOSE_BACK.png   # the Wild Goose Market pile
+```
+
+Same rules as below — any image extension works, and the remaining-count
+badge is overlaid automatically.
+
+## Card faces
+
 - Recommended size: **portrait, ~3:4 ratio** (e.g. 600×800 px). They're rendered
   into 84×116 slots and scaled with `background-size: cover`.
 - The filename must match the `kind` exactly (uppercase, with underscores).
