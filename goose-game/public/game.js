@@ -62,7 +62,8 @@ function sendWs(type, payload = {}) { ws.readyState === 1 && ws.send(JSON.string
 $('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $('nameInput').value || 'Goose', playerId }); };
 $('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value || 'Goose', playerId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
-$('startBtn').onclick = () => { playSound('click'); sendWs('start', { boutaGooseRule: $('boutaRule').checked }); };
+$('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
+$('boutaRule').onchange = (e) => sendWs('config', { boutaGooseRule: e.target.checked });
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() { const t = $('chatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('chatInput').value = ''; } }
@@ -109,19 +110,61 @@ function resetTransient() {
 
 function renderWaiting() {
   $('roomCode').textContent = view.code;
-  const list = $('memberList'); list.innerHTML = '';
-  for (const m of view.members) {
-    const li = document.createElement('li');
-    li.className = m.id === view.hostId ? 'host' : '';
-    li.innerHTML = `<span>${esc(m.name)}${m.id === playerId ? ' (you)' : ''}</span>`;
-    list.appendChild(li);
-  }
   const isHost = playerId === view.hostId;
-  $('startBtn').classList.toggle('hidden', !isHost);
+  const votes = view.votes || {};            // voterId -> candidateId
+  const myVote = votes[playerId] || null;
+
+  // Once it's decided, swap the vote UI for the announcement.
+  const decided = view.decided;
+  $('decidedMsg').classList.toggle('hidden', !decided);
+  $('voteList').classList.toggle('hidden', !!decided);
+  $('voteExplain').classList.toggle('hidden', !!decided);
+  if (decided) {
+    $('decidedMsg').innerHTML =
+      `<div class="decided-head">It's been decided.</div>
+       <div class="decided-body">The group has decided that <strong>${esc(decided.name)}</strong> is the silliest goose.</div>
+       <div class="decided-foot">${esc(decided.name)} goes first — flap yer wings…</div>`;
+  }
+
+  // Build a vote card per goose: name + everyone currently voting for them.
+  const list = $('voteList'); list.innerHTML = '';
+  for (const m of view.members) {
+    const voters = view.members.filter((v) => votes[v.id] === m.id);
+    const card = document.createElement('div');
+    card.className = 'vote-card' + (myVote === m.id ? ' my-vote' : '') + (voters.length ? ' has-votes' : '');
+    const tags = `${m.id === playerId ? '<span class="vm-you">you</span>' : ''}${m.isBot ? '<span class="vm-bot">computer</span>' : ''}${m.id === view.hostId ? '<span class="vm-host">host</span>' : ''}`;
+    card.innerHTML =
+      `<div class="vc-top">
+         <span class="vc-name">${esc(m.name)}</span>
+         <span class="vc-tags">${tags}</span>
+         <span class="vc-count">${voters.length || ''}</span>
+       </div>
+       <div class="vc-voters">${voters.map((v) => `<span class="voter-chip">${esc(v.name)}${v.id === playerId ? ' (you)' : ''}</span>`).join('')}</div>`;
+    if (!decided) {
+      card.classList.add('clickable');
+      card.onclick = () => { playSound('click'); sendWs('vote', { candidateId: m.id }); };
+    }
+    // remove-computer control for the host
+    if (isHost && m.isBot && !decided) {
+      const x = document.createElement('button');
+      x.className = 'vc-remove'; x.textContent = '✕'; x.title = 'Remove this computer';
+      x.onclick = (e) => { e.stopPropagation(); playSound('click'); sendWs('removebot', { botId: m.id }); };
+      card.querySelector('.vc-top').appendChild(x);
+    }
+    list.appendChild(card);
+  }
+
+  $('hostControls').classList.toggle('hidden', !isHost || !!decided);
+  $('boutaRule').checked = view.boutaGooseRule !== false;
   $('boutaRule').disabled = !isHost;
-  $('waitHint').textContent = isHost
-    ? (view.members.length < 2 ? 'Need at least 2 geese.' : 'Ready when you are.')
-    : 'Waiting for the host to start…';
+
+  const voteCount = Object.keys(votes).length;
+  const total = view.members.length;
+  if (decided) $('waitHint').textContent = 'Starting…';
+  else if (total < 2) $('waitHint').textContent = isHost ? 'Need at least 2 geese — add a computer or share the code.' : 'Waiting for more geese…';
+  else $('waitHint').textContent = myVote
+    ? `Waiting for everyone to agree… (${voteCount}/${total} voted)`
+    : 'Tap a goose to cast your vote.';
 }
 
 const me = () => view.game.players.find((p) => p.id === playerId);

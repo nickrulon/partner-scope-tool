@@ -108,6 +108,36 @@ input::placeholder { color: #9a8d6e; }
 .check.small { color: var(--ink); }
 .check input { width: auto; }
 
+/* ---------- silliest-goose vote (waiting room) ---------- */
+.vote-explain { font-size: .82rem; color: var(--ink-soft); margin: 0 0 12px; line-height: 1.35; }
+.vote-explain strong { color: var(--bill-dark); }
+.vote-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.vote-card { background: #fbf6e7; border: 2px solid var(--paper-edge); border-radius: 10px; padding: 9px 11px; transition: transform .05s, border-color .15s, background .15s; }
+.vote-card.clickable { cursor: pointer; }
+.vote-card.clickable:hover { border-color: var(--bill); transform: translateY(-1px); }
+.vote-card.my-vote { border-color: var(--bill); box-shadow: 0 0 0 2px rgba(224,122,46,.25); }
+.vote-card.has-votes { background: #f4ecd6; }
+.vc-top { display: flex; align-items: center; gap: 8px; }
+.vc-name { font-weight: bold; text-transform: uppercase; letter-spacing: .03em; font-size: .9rem; color: var(--ink); }
+.vc-tags { display: flex; gap: 4px; }
+.vc-tags span { font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; padding: 1px 5px; border-radius: 4px; border: 1px solid currentColor; }
+.vm-you { color: var(--bill-dark); }
+.vm-bot { color: #3a6ea5; }
+.vm-host { color: var(--good); }
+.vc-count { margin-left: auto; font-family: var(--display); font-size: 1.2rem; color: var(--bill-dark); min-width: 12px; text-align: right; }
+.vc-remove { background: transparent; border: none; color: var(--bad); font-size: 1rem; cursor: pointer; padding: 0 2px; box-shadow: none; line-height: 1; }
+.vc-remove:hover { filter: brightness(1.2); }
+.vc-voters { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.vc-voters:empty { display: none; }
+.voter-chip { font-size: .66rem; background: var(--pond-light); color: var(--cream); border-radius: 10px; padding: 2px 8px; }
+.host-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+.host-controls .check { margin-bottom: 0; }
+.decided { text-align: center; padding: 14px 10px 6px; animation: fadeIn .4s; }
+.decided-head { font-family: var(--display); font-size: 1.6rem; color: var(--bill-dark); }
+.decided-body { font-size: 1rem; color: var(--ink); margin-top: 6px; }
+.decided-body strong { color: var(--bill-dark); }
+.decided-foot { font-size: .8rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .1em; margin-top: 8px; }
+
 /* ---------- game shell ---------- */
 #game { display: flex; flex-direction: column; height: 100vh; padding: 10px; gap: 10px; }
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; gap: 12px; }

@@ -34,13 +34,17 @@
   <section id="waiting" class="screen lobby hidden">
     <div class="lobby-inner">
       <h1 class="logo small">The Pond</h1>
-      <p class="tag">Share the code. The silliest goose goes first (chosen at random).</p>
+      <p class="tag">Share the code, then settle the only question that matters.</p>
       <div class="paper lobby-card">
         <div class="codepill">Room <strong id="roomCode"></strong></div>
-        <ul id="memberList" class="members"></ul>
-        <label class="check"><input type="checkbox" id="boutaRule" checked />
-          <span>Use the "I'm bouta goose!" rule — must announce at 17 to win</span></label>
-        <button id="startBtn" class="btn btn-primary block">Start Goosin'</button>
+        <div id="decidedMsg" class="decided hidden"></div>
+        <p id="voteExplain" class="vote-explain">Click the goose you reckon is the <strong>silliest</strong>. The game starts only once it's <strong>unanimous</strong> — and that goose goes first.</p>
+        <div id="voteList" class="vote-list"></div>
+        <div id="hostControls" class="host-controls hidden">
+          <button id="addBotBtn" class="btn block">+ Add a Computer Goose</button>
+          <label class="check"><input type="checkbox" id="boutaRule" checked />
+            <span>Use the "I'm bouta goose!" rule — must announce at 17 to win</span></label>
+        </div>
         <p id="waitHint" class="tag"></p>
       </div>
     </div>
