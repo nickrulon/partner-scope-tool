@@ -7,6 +7,11 @@ import { CARD_META, SET_ASIDE, TRADE_COST, WIN_SCORE, ANNOUNCE_AT, points } from
 let _id = 0;
 const newId = () => `c${++_id}`;
 
+// Only the plain goose cards can be named (not Wilds / Ungoosables). The number
+// of names a card can hold equals its point value: Goose 1, Geese 2, Geeses 4.
+const NAMEABLE = new Set(['GOOSE', 'GEESE', 'GEESES']);
+const nameSlots = (kind) => (NAMEABLE.has(kind) ? points(kind) : 0);
+
 // Mulberry32 — small seedable RNG so tests are deterministic.
 export function makeRng(seed = Date.now() >>> 0) {
   let a = seed >>> 0;
@@ -163,8 +168,8 @@ function checkWin(state, player) {
   if (score(player) < WIN_SCORE) return false;
   if (state.options.boutaGooseRule && !player.announcedBoutaGoose) {
     // Got caught with 21 without calling it — the whole gaggle scatters.
-    discardRegularHand(state, player, `reached ${WIN_SCORE} but never announced "I'm bouta goose!"`);
-    logMsg(state, `${player.name} got GOOSED for not announcing — lost their whole regular hand! No crown this time.`, 'bad');
+    discardRegularHand(state, player, `hit ${WIN_SCORE} but never announced "I'm bout to goose"`);
+    logMsg(state, `${player.name} got GOOSED for not announcing "I'm bout to goose" — lost their whole regular hand! No crown this time.`, 'bad');
     emitFx(state, 'PENALTY', { actor: player.name });
     return false;
   }
@@ -183,6 +188,11 @@ export function applyAction(state, playerId, action) {
   if (state.phase === 'GAME_OVER') return err(state, 'The game is over.');
   const type = action?.type;
 
+  // Naming geese is purely cosmetic: allowed any time on cards you own, and it
+  // never touches the turn, phase, or score. Names ride on the card object, so
+  // they survive discard → reshuffle and travel to whoever next draws the card.
+  if (type === 'NAME_GOOSE') return nameGoose(state, playerId, action);
+
   // Response phase: only the pending target may act.
   if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
     if (type !== 'RESPOND') return err(state, 'Waiting for a response to the threat.');
@@ -200,6 +210,24 @@ export function applyAction(state, playerId, action) {
     case 'DRAW':           return draw(state);
     default:               return err(state, `Unknown action: ${type}`);
   }
+}
+
+function nameGoose(state, playerId, action) {
+  const p = findPlayer(state, playerId);
+  if (!p) return err(state, 'Unknown goose.');
+  const card = p.regular.find((c) => c.id === action.cardId);
+  if (!card) return err(state, 'You can only name geese in your own gaggle.');
+  const max = nameSlots(card.kind);
+  if (max === 0) return err(state, 'That card can\'t be named.');
+  const names = (action.names || [])
+    .map((n) => String(n).trim().slice(0, 24))
+    .filter(Boolean)
+    .slice(0, max);
+  card.names = names;
+  if (names.length) {
+    logMsg(state, `You named your ${CARD_META[card.kind].name}: ${names.join(', ')}.`, 'good', p.id);
+  }
+  return { state };
 }
 
 function announce(state) {
@@ -269,7 +297,7 @@ function draw(state) {
   // Private — opponents never learn what you drew (log AND sound stay private,
   // so the per-card draw sound can't reveal the card to the table).
   logMsg(state, `You drew a ${CARD_META[card.kind].name}.`, 'info', p.id);
-  emitFx(state, 'DRAW', { actor: p.name, actorId: p.id, kind: card.kind, to: p.id });
+  emitFx(state, 'DRAW', { actor: p.name, actorId: p.id, kind: card.kind, cardId: card.id, to: p.id });
   // Public, card-less — lets opponents animate a facedown mystery draw.
   emitFx(state, 'DRAW_HIDDEN', { actor: p.name, actorId: p.id });
   if (checkWin(state, p)) return { state };

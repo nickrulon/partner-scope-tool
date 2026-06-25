@@ -186,6 +186,44 @@ console.log('\n== Big Boy draw IS public + emits an fx event ==');
   ok(fx, 'a BIG_BOY fx event was emitted');
 }
 
+console.log('\n== Naming geese: caps by point value, only goose cards ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 21 });
+  g.players[0].regular = [{ id: 'g1', kind: 'GEESE' }];          // 2 names allowed
+  giveWild(g, 'A', 'UNGOOSABLE');
+  const wildId = g.players[0].wild[0].id;
+  const r1 = applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: 'g1', names: ['Gerald', 'Gandalf', 'Extra'] });
+  ok(!r1.error, 'naming a Geese accepted');
+  eq(g.players[0].regular[0].names.length, 2, 'Geese capped at 2 names');
+  const r2 = applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: wildId, names: ['Nope'] });
+  ok(!!r2.error, 'cannot name a wild card');
+  const r3 = applyAction(g, 'B', { type: 'NAME_GOOSE', cardId: 'g1', names: ['Steal'] });
+  ok(!!r3.error, 'cannot name a goose you do not hold');
+}
+
+console.log('\n== Names ride the card through discard → reshuffle ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 22 });
+  // One named goose in A's hand; empty the draw pile so a Big Boy reshuffles.
+  g.players[0].regular = [{ id: 'g1', kind: 'GOOSE', names: ['Gerald'] }];
+  applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: 'g1', names: ['Gerald'] });
+  // Big Boy → absorb sends the named goose to the discard.
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  applyAction(g, 'A', { type: 'RESPOND', response: 'absorb' });
+  const inDiscard = g.gooseDiscard.find((c) => c.id === 'g1');
+  ok(inDiscard && inDiscard.names && inDiscard.names[0] === 'Gerald', 'named goose kept its name in the discard');
+}
+
+console.log('\n== Draw fx carries the card id for the reveal ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 23 });
+  stackGoose(g, ['GOOSE']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  const fx = redact(g, 'A').fx.find((f) => f.type === 'DRAW');
+  ok(fx && fx.cardId, 'DRAW fx includes a cardId');
+}
+
 console.log('\n== Defending champion starts with Great Honkeror (+2) ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 11, honkerorHolderId: 'A' });

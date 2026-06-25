@@ -19,6 +19,8 @@ let lastFxId = 0, fxPrimed = false;
 let laneTimer = null;
 
 const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' };
+// How many names each goose card can hold (matches its point value).
+const NAME_MAX = { GOOSE: 1, GEESE: 2, GEESES: 4 };
 
 // ---- art probing (resolves real extension; sizes as cover) ----
 const artStatus = {}, artUrl = {};
@@ -82,10 +84,27 @@ function rerender() { if (view) render(); }
 
 function render() {
   if (!view) return;
-  if (!view.code) { showScreen('lobby'); return; }
-  if (!view.game) { renderWaiting(); showScreen('waiting'); return; }
+  if (!view.code) { resetTransient(); showScreen('lobby'); return; }
+  if (!view.game) { resetTransient(); renderWaiting(); showScreen('waiting'); return; }
   renderGame();
   showScreen('game');
+}
+
+// Tear down any in-game overlays/animations when we leave the table (back to
+// lobby or waiting room on a rematch). Without this the Win overlay — Great
+// Honkeror card + "X WINS" — stayed pinned on top of the new waiting screen.
+// Also re-arms the fx feed so the next game's effects (which restart their id
+// counter at 1) aren't filtered out as "already seen" — that was why the
+// losing sound went quiet after a rematch.
+function resetTransient() {
+  $('overlay').classList.add('hidden');
+  $('overlay').classList.remove('win');
+  $('flyLayer').innerHTML = '';
+  document.querySelectorAll('.name-modal').forEach((m) => m.remove());
+  clearTimeout(laneTimer);
+  winDismissed = false; laneBusy = false;
+  tradeMode = false; tradeSel.clear(); targetMode = null; goosedChoosing = false;
+  fxPrimed = false; lastFxId = 0;
 }
 
 function renderWaiting() {
@@ -194,12 +213,28 @@ function renderMine() {
   (p.wild || []).forEach((c) => wild.appendChild(cardEl(c, false)));
   const reg = $('myRegular'); reg.innerHTML = '';
   (p.regular || []).forEach((c) => {
+    const slot = document.createElement('div');
+    slot.className = 'card-slot';
     const el = cardEl(c, tradeMode);
     if (tradeMode) {
       if (tradeSel.has(c.id)) el.classList.add('selected');
-      el.onclick = () => { tradeSel.has(c.id) ? tradeSel.delete(c.id) : tradeSel.add(c.id); renderMine(); renderControls(); };
+      el.onclick = () => {
+        tradeSel.has(c.id) ? tradeSel.delete(c.id) : tradeSel.add(c.id);
+        renderMine(); renderControls(); renderPlayArea();
+      };
+    } else if (NAME_MAX[c.kind]) {
+      el.classList.add('nameable');
+      el.title = 'Click to name this goose';
+      el.onclick = () => { playSound('click'); openNameModal(c.id); };
     }
-    reg.appendChild(el);
+    slot.appendChild(el);
+    const names = c.names || [];
+    const cap = document.createElement('div');
+    cap.className = 'card-cap';
+    if (names.length) cap.textContent = names.join(' · ');
+    else if (NAME_MAX[c.kind] && !tradeMode) cap.innerHTML = '<span class="unnamed">name me</span>';
+    slot.appendChild(cap);
+    reg.appendChild(slot);
   });
   const total = (p.regular || []).reduce((s, c) => s + (cardMeta[c.kind]?.points || 0), 0);
   const n = p.regular ? p.regular.length : 0;
@@ -242,14 +277,14 @@ function renderControls() {
     const confirm = btn('Trade for a Wild', 'btn-primary', doTrade);
     confirm.disabled = total !== 4 || g.wildDrawCount === 0;
     c.appendChild(confirm);
-    c.appendChild(btn('Cancel', 'btn-ghost', () => { tradeMode = false; tradeSel.clear(); renderMine(); renderControls(); }));
+    c.appendChild(btn('Cancel', 'btn-ghost', () => { tradeMode = false; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); }));
     return;
   }
 
   if (p.score >= 17 && !p.announcedBoutaGoose) {
     c.appendChild(btn('Announce: I’m bouta goose!', 'btn-primary', () => sendWs('action', { action: { type: 'ANNOUNCE_GOOSE' } })));
   }
-  const tradeBtn = btn('Trade in Wild Goose Market', '', () => { tradeMode = true; tradeSel.clear(); renderMine(); renderControls(); });
+  const tradeBtn = btn('Trade in Wild Goose Market', '', () => { tradeMode = true; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); });
   tradeBtn.disabled = g.wildDrawCount === 0 || p.regular.length === 0;
   c.appendChild(tradeBtn);
   if ((p.wild || []).some((w) => w.kind === 'LAWN_MOWER')) {
@@ -258,6 +293,52 @@ function renderControls() {
   c.appendChild(btn('Draw a Goose Card  (ends turn)', 'btn-primary', () => sendWs('action', { action: { type: 'DRAW' } }), { seqClick: true }));
 }
 function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tradeSel] } }); tradeMode = false; tradeSel.clear(); }
+
+// ---- name your geese ----
+// Goose holds 1 name, Geese 2, Geeses 4. Names persist on the card object, so
+// they survive the reshuffle and travel to whoever next draws the card.
+function openNameModal(cardId, onClose) {
+  const done = () => { wrap.remove(); onClose && onClose(); };
+  const card = me().regular?.find((c) => c.id === cardId);
+  const max = card ? (NAME_MAX[card.kind] || 0) : 0;
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay name-modal';
+  if (!card || max === 0) { onClose && onClose(); return; }
+  const meta = cardMeta[card.kind] || {};
+  const existing = card.names || [];
+  const box = document.createElement('div');
+  box.className = 'paper name-box';
+  const h = document.createElement('div');
+  h.className = 'nm-title';
+  h.textContent = max === 1 ? `Name your ${meta.name}` : `Name your ${meta.name} — up to ${max} names`;
+  box.appendChild(h);
+  const inputs = [];
+  for (let i = 0; i < max; i++) {
+    const inp = document.createElement('input');
+    inp.className = 'nm-input';
+    inp.maxLength = 24;
+    inp.placeholder = max === 1 ? 'e.g. Gerald' : `Name ${i + 1}`;
+    inp.value = existing[i] || '';
+    inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+    inputs.push(inp);
+    box.appendChild(inp);
+  }
+  const row = document.createElement('div');
+  row.className = 'nm-actions';
+  const save = () => {
+    const names = inputs.map((x) => x.value.trim()).filter(Boolean);
+    sendWs('action', { action: { type: 'NAME_GOOSE', cardId, names } });
+    done();
+  };
+  row.appendChild(btn('Save name' + (max > 1 ? 's' : ''), 'btn-primary', save));
+  row.appendChild(btn('Cancel', 'btn-ghost', done));
+  box.appendChild(row);
+  wrap.appendChild(box);
+  // Click on the dim backdrop cancels.
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
+  document.body.appendChild(wrap);
+  inputs[0] && inputs[0].focus();
+}
 
 // ---- lawn-mower targeting (click a player panel) ----
 function beginLawnTarget() { targetMode = true; toast('Pick a target — click a player.'); renderPlayers(); }
@@ -333,32 +414,68 @@ function handleFx() {
   const fresh = fx.filter((f) => f.id > lastFxId);
   if (!fresh.length) return;
   lastFxId = fx.reduce((m, f) => Math.max(m, f.id), lastFxId);
+
+  // If this batch animates a draw, the turn-pass (its sound + the center
+  // "turn passes" banner) waits until the card has finished its trip — so the
+  // turn sound lands with a clear visual instead of overlapping the draw sound.
+  const drawsThisBatch = fresh.some((f) => f.type === 'DRAW' || (f.type === 'DRAW_HIDDEN' && f.actorId !== playerId));
+  const turnFx = fresh.find((f) => f.type === 'TURN');
+  const afterDraw = () => { if (turnFx) playTurn(turnFx); };
+
   for (const f of fresh) {
     if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
-    // DRAW and TURN go through the sequential queue (after the Draw click).
-    else if (f.type === 'DRAW') { enqueueSound(drawSound(f.kind)); flyDraw({ faceKind: f.kind, toEl: $('myRegular') }); }
-    else if (f.type === 'DRAW_HIDDEN') { if (f.actorId !== playerId) flyDraw({ faceKind: null, toEl: playerPanel(f.actorId) }); }
-    else if (f.type === 'TURN') { enqueueSound('turn'); }
+    // Your own draw: play your private per-card sound, fly it big into center,
+    // hold it ~3s so you can read it, then sail it into your gaggle.
+    else if (f.type === 'DRAW') {
+      enqueueSound(drawSound(f.kind));
+      flyDraw({ faceKind: f.kind, cardId: f.cardId, reveal: true, toEl: $('myRegular'), onSettled: afterDraw });
+    }
+    // Opponent's draw: a facedown mystery card flies to their panel (no reveal).
+    else if (f.type === 'DRAW_HIDDEN') {
+      if (f.actorId !== playerId) flyDraw({ faceKind: null, toEl: playerPanel(f.actorId), onSettled: afterDraw });
+    }
+    else if (f.type === 'TURN') { if (!drawsThisBatch) playTurn(f); }
     else playSound(fxSound(f.type));
     if (f.type === 'BIG_BOY') slamOverlay();
     else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) flashEvent(f);
   }
 }
 
+// Turn-pass: the sound plus a short center banner so it's clear what the sound
+// means (this is a transition, kept brief on purpose so it doesn't block play).
+function playTurn() {
+  playSound('turn');
+  flashTurn();
+}
+function flashTurn() {
+  const pa = $('playArea');
+  if (!pa) return;
+  const g = view.game;
+  if (g.phase !== 'PRE_DRAW') return; // mid-threat / game over — skip the banner
+  const mineNow = isMyTurn();
+  const who = mineNow ? 'You' : (g.players.find((x) => x.id === g.turnPlayerId)?.name || 'next goose');
+  pa.innerHTML = `<div class="turn-flip${mineNow ? ' mine' : ''}">
+      <div class="tf-label">turn passes to</div>
+      <div class="tf-name">${esc(who)}</div>
+    </div>`;
+  laneBusy = true;
+  clearTimeout(laneTimer);
+  laneTimer = setTimeout(() => { laneBusy = false; renderPlayArea(); }, 1800);
+}
+
 function playerPanel(id) { return document.querySelector(`.player[data-pid="${id}"]`); }
 
 // Animate a card from the goose deck, big through the center, to a destination.
-function flyDraw({ faceKind, toEl }) {
-  const deck = $('gooseDraw'), play = $('playArea');
-  if (!deck || !play) return;
+// `reveal` (your own draw) holds it large for ~3s with a caption + naming, then
+// sails it to your gaggle. Facedown opponent draws get a quick fly-by.
+function flyDraw({ faceKind, cardId, reveal, toEl, onSettled }) {
+  const deck = $('gooseDraw'), play = $('playArea'), layer = $('flyLayer');
+  if (!deck || !play || !layer) { onSettled && onSettled(); return; }
   const fr = deck.getBoundingClientRect(), pr = play.getBoundingClientRect();
   const w = fr.width, h = fr.height;
   const startCx = fr.left + w / 2, startCy = fr.top + h / 2;
   const cdx = (pr.left + pr.width / 2) - startCx, cdy = (pr.top + pr.height / 2) - startCy;
-  const tr = (toEl || play).getBoundingClientRect();
-  const ddx = (tr.left + tr.width / 2) - startCx, ddy = (tr.top + tr.height / 2) - startCy;
-  const bigScale = Math.max(1.6, Math.min(4, (pr.height * 0.42) / h));
-  const destScale = toEl ? Math.max(0.5, (tr.height * 0.8) / h) : 1;
+  const bigScale = Math.max(1.6, Math.min(4.5, (pr.height * 0.5) / h));
 
   const card = document.createElement('div');
   card.className = 'fly-card';
@@ -366,16 +483,70 @@ function flyDraw({ faceKind, toEl }) {
   if (hasArt(kind)) card.style.backgroundImage = `url(${artUrl[kind]})`;
   else card.style.backgroundColor = faceKind ? (cardMeta[faceKind]?.color || '#caa') : '#1a3328';
   Object.assign(card.style, { left: `${fr.left}px`, top: `${fr.top}px`, width: `${w}px`, height: `${h}px` });
-  $('flyLayer').appendChild(card);
+  layer.appendChild(card);
+  if (reveal) laneBusy = true; // keep idle status from wiping the center reveal
 
-  const anim = card.animate([
-    { transform: 'translate(0,0) scale(1)', opacity: 0.5 },
-    { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1, offset: 0.22 },
-    { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1, offset: 0.68 },
-    { transform: `translate(${ddx}px,${ddy}px) scale(${destScale})`, opacity: 0.85 },
-  ], { duration: 1500, easing: 'cubic-bezier(.4,1.2,.5,1)', fill: 'forwards' });
-  anim.onfinish = () => card.remove();
-  anim.oncancel = () => card.remove();
+  const HOLD = reveal ? 3000 : 500;
+  let caption = null, outTimer = null, settled = false;
+
+  const finish = () => {
+    if (settled) return; settled = true;
+    if (caption) caption.remove();
+    card.remove();
+    if (reveal) laneBusy = false;
+    onSettled && onSettled();
+  };
+  const flyOut = () => {
+    if (caption) { caption.remove(); caption = null; }
+    const tr = (toEl || play).getBoundingClientRect();
+    const ddx = (tr.left + tr.width / 2) - startCx, ddy = (tr.top + tr.height / 2) - startCy;
+    const destScale = toEl ? Math.max(0.4, (tr.height * 0.7) / h) : 1;
+    const out = card.animate([
+      { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1 },
+      { transform: `translate(${ddx}px,${ddy}px) scale(${destScale})`, opacity: 0.15 },
+    ], { duration: 520, easing: 'cubic-bezier(.5,0,.7,1)', fill: 'forwards' });
+    out.onfinish = finish; out.oncancel = finish;
+  };
+
+  const inAnim = card.animate([
+    { transform: 'translate(0,0) scale(1)', opacity: 0.6 },
+    { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1 },
+  ], { duration: 460, easing: 'cubic-bezier(.3,1.3,.5,1)', fill: 'forwards' });
+  inAnim.oncancel = finish;
+  inAnim.onfinish = () => {
+    if (reveal) caption = buildDrawCaption(cardId, faceKind, {
+      pause: () => clearTimeout(outTimer),
+      resume: () => { outTimer = setTimeout(flyOut, 700); },
+    });
+    outTimer = setTimeout(flyOut, HOLD);
+  };
+}
+
+// The caption that sits under the big revealed card: its name, any goose names
+// already on it, and a button to (re)name it. Returns the element so flyDraw
+// can remove it when the card flies off.
+function buildDrawCaption(cardId, faceKind, hooks) {
+  const tag = document.createElement('div');
+  tag.className = 'draw-caption';
+  const card = me().regular?.find((c) => c.id === cardId);
+  const meta = cardMeta[faceKind] || {};
+  const names = card?.names || [];
+  const max = NAME_MAX[faceKind] || 0;
+  tag.innerHTML = `<div class="dc-name">${esc(meta.name || faceKind)}</div>` +
+    (names.length ? `<div class="dc-geesenames">${names.map((n) => esc(n)).join(' · ')}</div>` : '');
+  if (max > 0 && names.length < max) {
+    const b = document.createElement('button');
+    b.className = 'btn btn-primary dc-btn';
+    b.textContent = names.length ? 'Add a name' : (max > 1 ? 'Name your geese' : 'Name this goose');
+    b.onclick = () => {
+      playSound('click');
+      hooks.pause();                       // freeze the fly-out while naming
+      openNameModal(cardId, () => hooks.resume());
+    };
+    tag.appendChild(b);
+  }
+  $('playArea').appendChild(tag);
+  return tag;
 }
 
 function slamOverlay() {
@@ -395,6 +566,7 @@ function renderPlayArea() {
   if (laneBusy) return;
   const g = view.game, pa = $('playArea');
   if (g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED') { pa.innerHTML = ''; return; }
+  if (tradeMode && isMyTurn() && g.phase === 'PRE_DRAW') { renderTradeStage(pa); return; }
   let main, mine = false;
   if (g.phase === 'GAME_OVER') { const w = g.players.find((x) => x.id === g.winnerId); main = w ? `${w.name} wins` : 'Game over'; }
   else if (isMyTurn()) { main = 'Your move'; mine = true; }
@@ -406,13 +578,46 @@ function renderPlayArea() {
     </div>`;
 }
 
+// Trade pulls your tradeable geese into the center, big enough to pick from.
+function renderTradeStage(pa) {
+  const p = me();
+  const total = [...tradeSel].reduce((s, id) => s + (cardMeta[p.regular.find((x) => x.id === id)?.kind]?.points || 0), 0);
+  pa.innerHTML = `<div class="trade-stage">
+      <div class="ts-head">Wild Goose Market</div>
+      <div class="ts-sub">Tap geese worth exactly 4 points to trade for a Wild card — selected ${total}/4</div>
+      <div class="ts-cards" id="tsCards"></div>
+    </div>`;
+  const box = pa.querySelector('#tsCards');
+  if (!p.regular || !p.regular.length) { box.innerHTML = '<div class="ts-empty">No geese in your gaggle to trade.</div>'; return; }
+  p.regular.forEach((c) => {
+    const slot = document.createElement('div');
+    slot.className = 'card-slot';
+    const el = cardEl(c, true);
+    el.classList.add('big');
+    if (tradeSel.has(c.id)) el.classList.add('selected');
+    el.onclick = () => {
+      tradeSel.has(c.id) ? tradeSel.delete(c.id) : tradeSel.add(c.id);
+      renderTradeStage(pa); renderControls(); renderMine();
+    };
+    slot.appendChild(el);
+    const names = c.names || [];
+    if (names.length) {
+      const cap = document.createElement('div');
+      cap.className = 'card-cap';
+      cap.textContent = names.join(' · ');
+      slot.appendChild(cap);
+    }
+    box.appendChild(slot);
+  });
+}
+
 const EVENT_FLASH = {
   LAWN_MOWER: { kind: 'LAWN_MOWER', title: 'LAWN MOWER!', sub: (f) => `${f.actor} mowed ${f.target}` },
   GET_GOOSED: { kind: 'GET_GOOSED', title: 'GET GOOSED!', sub: (f) => `${f.actor} → ${f.target}` },
   GOOSE_GANG: { kind: 'GOOSE_GANG', title: 'GOOSE GANG!', sub: (f) => `${f.actor} blocked it` },
   ANNOUNCE:   { kind: null, title: 'BOUTA GOOSE!', sub: (f) => `${f.actor} is closing in` },
   TRADE:      { kind: null, title: 'WILD MARKET', sub: (f) => `${f.actor} traded for a Wild` },
-  PENALTY:    { kind: null, title: 'GOOSED!', sub: (f) => `${f.actor} forgot to announce` },
+  PENALTY:    { kind: null, title: 'GOOSED!', sub: (f) => `${f.actor} got goosed for not announcing “I'm bout to goose”` },
 };
 function flashEvent(f) {
   const cfg = EVENT_FLASH[f.type]; if (!cfg) return;
@@ -425,7 +630,8 @@ function flashEvent(f) {
     </div>`;
   laneBusy = true;
   clearTimeout(laneTimer);
-  laneTimer = setTimeout(() => { laneBusy = false; renderPlayArea(); }, 2400);
+  // Hold center messages on screen ≥3s so they're easy to read.
+  laneTimer = setTimeout(() => { laneBusy = false; renderPlayArea(); }, 3200);
 }
 
 // ---- log / chat ----

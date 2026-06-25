@@ -213,7 +213,48 @@ input::placeholder { color: #9a8d6e; }
 .event-flash { text-align: center; animation: stampIn .4s ease-out; }
 .event-flash .ef-card { width: clamp(150px, 22vh, 220px); aspect-ratio: 3/4; margin: 0 auto 14px; border-radius: 14px; border: 3px solid var(--ink); background-size: cover; background-position: center; background-color: var(--cream); box-shadow: 0 12px 0 rgba(0,0,0,.3); }
 .event-flash .ef-title { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 2.4rem); color: var(--cream); text-shadow: 2px 2px 0 var(--ink); }
-.event-flash .ef-sub { color: var(--cream-2); font-size: 1rem; margin-top: 6px; }
+.event-flash .ef-sub { color: var(--cream-2); font-size: 1rem; margin-top: 6px; max-width: 80%; margin-left: auto; margin-right: auto; }
+
+/* turn-pass banner in the center (brief transition) */
+.turn-flip { text-align: center; animation: stampIn .35s ease-out; }
+.turn-flip .tf-label { font-family: var(--type); text-transform: uppercase; letter-spacing: .2em; color: var(--cream-2); font-size: .8rem; }
+.turn-flip .tf-name { font-family: var(--display); font-size: clamp(1.8rem, 3.4vw, 2.8rem); color: var(--cream); text-shadow: 3px 3px 0 var(--ink); margin-top: 4px; }
+.turn-flip.mine .tf-name { color: var(--bill); }
+
+/* caption under the big revealed draw — card name + goose names + name button */
+.draw-caption {
+  position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%);
+  text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center;
+  z-index: 95; pointer-events: auto;
+}
+.draw-caption .dc-name { font-family: var(--display); font-size: 1.4rem; color: var(--cream); text-shadow: 2px 2px 0 var(--ink); }
+.draw-caption .dc-geesenames { color: var(--bill); font-size: 1rem; font-weight: bold; }
+.draw-caption .dc-btn { font-size: .9rem; padding: 8px 16px; }
+
+/* trade-in-the-market: tradeable geese pulled big into the center */
+.trade-stage { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 14px; text-align: center; }
+.trade-stage .ts-head { font-family: var(--display); font-size: clamp(1.5rem, 3vw, 2.2rem); color: var(--cream); text-shadow: 2px 2px 0 var(--ink); }
+.trade-stage .ts-sub { color: var(--cream-2); font-size: .9rem; }
+.trade-stage .ts-cards { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; align-items: flex-start; overflow-y: auto; max-height: 70%; padding: 6px; }
+.trade-stage .ts-empty { color: var(--cream-2); font-size: 1rem; }
+
+/* a card-slot wraps a card + an optional name caption under it */
+.card-slot { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.card-cap { font-size: .62rem; line-height: 1.05; text-align: center; max-width: 84px; color: var(--cream-2); word-break: break-word; }
+.myhand .card-cap { color: var(--ink-soft); }
+.card-cap .unnamed { opacity: .55; font-style: italic; }
+.card.nameable { cursor: pointer; }
+.card.nameable:hover { transform: translateY(-6px); }
+.card.big { width: clamp(110px, 15vh, 150px); }
+
+/* name-your-goose modal */
+.name-modal { z-index: 130; }
+.name-box { width: min(92vw, 380px); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
+.name-box .nm-title { font-family: var(--display); font-size: 1.4rem; color: var(--ink); text-align: center; }
+.name-box .nm-input { width: 100%; }
+.name-box .nm-actions { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
+/* ghost button sits on cream paper here — give it ink so it's legible */
+.name-box .btn-ghost { color: var(--ink); border-color: var(--ink); }
 
 /* bottom-center action bar (on your turn) */
 .stage-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; min-height: 8px; }

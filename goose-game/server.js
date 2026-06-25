@@ -12,8 +12,12 @@ import { CARD_META } from './cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
+<<<<<<< HEAD
 // Cloud hosts (Render/Railway/Fly/etc.) inject PORT; fall back for local dev.
 const PORT = process.env.PORT || process.env.GOOSE_PORT || 3030;
+=======
+const PORT = process.env.GOOSE_PORT || process.env.PORT || 3030;
+>>>>>>> e483106 (Name your geese, 3s draw reveal, center trade, turn anim, rematch fix)
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',

@@ -6,7 +6,7 @@
 const SOUND_NAMES = [
   'click', 'drawgoose', 'drawgeese', 'drawgeeses', 'honk', 'bigboy',
   'lawnmower', 'getgoosed', 'goosegang', 'turn', 'win', 'lose',
-  'trade', 'announce', 'goosed',
+  'trade', 'announce', 'goosed', 'goosednoannounce',
 ];
 const EXTS = ['mp3', 'ogg', 'wav', 'm4a'];
 
@@ -54,12 +54,22 @@ export function enqueueSound(name) {
   queue.push(name);
   if (!pumping) pump();
 }
+let waited = 0;
 function pump() {
   if (!queue.length) { pumping = false; return; }
   pumping = true;
-  const name = queue.shift();
+  const name = queue[0]; // peek — don't drop a sound that's still loading
   const url = resolved[name];
-  if (!url) { probe(name); setTimeout(pump, 60); return; } // missing → small gap, continue
+  if (url === undefined) {
+    // Still probing this file. Wait briefly (so the chain stays in order)
+    // rather than skipping ahead to the next sound (which made `turn` play
+    // before `drawgoose` had finished loading). Give up after ~1.2s.
+    probe(name);
+    if (waited < 1200) { waited += 80; setTimeout(pump, 80); return; }
+  }
+  waited = 0;
+  queue.shift();
+  if (!url) { setTimeout(pump, 40); return; } // confirmed missing → small gap, continue
   let advanced = false;
   const next = () => { if (advanced) return; advanced = true; pump(); };
   try {
@@ -79,7 +89,7 @@ function pump() {
 const FX_SOUND = {
   BIG_BOY: 'bigboy', LAWN_MOWER: 'lawnmower', GET_GOOSED: 'getgoosed',
   GOOSE_GANG: 'goosegang', TRADE: 'trade', ANNOUNCE: 'announce',
-  TURN: 'turn', WIN: 'win', PENALTY: 'goosed', ABSORB: 'goosed',
+  TURN: 'turn', WIN: 'win', PENALTY: 'goosednoannounce', ABSORB: 'goosed',
 };
 export function fxSound(type) { return FX_SOUND[type] || null; }
 

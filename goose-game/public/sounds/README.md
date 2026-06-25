@@ -17,7 +17,8 @@ Supported extensions (first one found wins): **mp3, ogg, wav, m4a**.
 | `turn`      | the turn passes to the next player |
 | `announce`  | a player announces "I'm bouta goose!" |
 | `trade`     | a Wild Goose Market trade happens |
-| `goosed`    | a player loses their hand (Big Boy / penalty) |
+| `goosed`    | a player loses their hand to Big Boy (took the hit) |
+| `goosednoannounce` | a player hits 21 **without** announcing "I'm bout to goose" and gets goosed |
 | `win`       | someone wins |
 | `lose`      | you lose (the winner was someone else) |
 
