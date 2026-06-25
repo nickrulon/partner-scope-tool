@@ -12,7 +12,8 @@ import { CARD_META } from './cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
-const PORT = process.env.GOOSE_PORT || 3030;
+// Cloud hosts (Render/Railway/Fly/etc.) inject PORT; fall back for local dev.
+const PORT = process.env.PORT || process.env.GOOSE_PORT || 3030;
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',

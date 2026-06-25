@@ -1,0 +1,15 @@
+# Render blueprint for the Quit Goosin' Around! game server.
+# One Node web service hosts BOTH the static client and the WebSocket server
+# (goose-game/server.js serves public/ and upgrades WS on the same port).
+# Render injects PORT automatically; the server reads process.env.PORT.
+services:
+  - type: web
+    name: quit-goosin-around
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run game
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
