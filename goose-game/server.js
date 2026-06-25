@@ -12,18 +12,20 @@ import { CARD_META, ANNOUNCE_AT } from './cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
-<<<<<<< HEAD
 // Cloud hosts (Render/Railway/Fly/etc.) inject PORT; fall back for local dev.
 const PORT = process.env.PORT || process.env.GOOSE_PORT || 3030;
-=======
-const PORT = process.env.GOOSE_PORT || process.env.PORT || 3030;
->>>>>>> e483106 (Name your geese, 3s draw reveal, center trade, turn anim, rematch fix)
 
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon', '.json': 'application/json',
+  // audio (drop-in sound files)
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
 };
+// Case-insensitive lookup so uppercase asset names (GOOSE.PNG, .M4A) serve with
+// the right type on case-sensitive hosts like Render's Linux, not octet-stream.
+const mimeFor = (fp) => MIME[path.extname(fp).toLowerCase()] || 'application/octet-stream';
 
 // --- Static file server --------------------------------------------------
 
@@ -38,7 +40,7 @@ const httpServer = http.createServer((req, res) => {
     // Never let the browser serve a stale copy — so edited/resized art and
     // updated client code always show on refresh.
     res.writeHead(200, {
-      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
+      'Content-Type': mimeFor(filePath),
       'Cache-Control': 'no-cache, no-store, must-revalidate',
     });
     res.end(data);
