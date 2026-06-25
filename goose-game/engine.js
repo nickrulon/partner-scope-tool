@@ -269,7 +269,9 @@ function draw(state) {
   // Private — opponents never learn what you drew (log AND sound stay private,
   // so the per-card draw sound can't reveal the card to the table).
   logMsg(state, `You drew a ${CARD_META[card.kind].name}.`, 'info', p.id);
-  emitFx(state, 'DRAW', { actor: p.name, kind: card.kind, to: p.id });
+  emitFx(state, 'DRAW', { actor: p.name, actorId: p.id, kind: card.kind, to: p.id });
+  // Public, card-less — lets opponents animate a facedown mystery draw.
+  emitFx(state, 'DRAW_HIDDEN', { actor: p.name, actorId: p.id });
   if (checkWin(state, p)) return { state };
   endTurn(state);
   return { state };

@@ -198,20 +198,36 @@ input::placeholder { color: #9a8d6e; }
 .turn-banner { font-family: var(--display); font-size: clamp(1.8rem, 3.4vw, 3rem); color: var(--cream); text-shadow: 3px 3px 0 var(--ink); line-height: 1; }
 .turn-banner.mine { color: var(--bill); }
 .turn-sub { font-family: var(--type); text-transform: uppercase; letter-spacing: .2em; color: var(--cream-2); font-size: .85rem; margin-top: 4px; }
-.event-lane {
+/* the live play table */
+.play-area {
   flex: 1; border: 3px dashed rgba(241,231,207,.35); border-radius: 16px;
   display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Ctext x='50%25' y='55%25' font-size='120' text-anchor='middle' fill='%23ffffff' opacity='0.03'%3E%E2%97%86%3C/text%3E%3C/svg%3E");
 }
-.event-idle { text-align: center; color: var(--cream-2); opacity: .6; display: flex; flex-direction: column; gap: 6px; }
-.event-idle-title { font-family: var(--display); font-size: 1.3rem; }
-.event-idle-sub { font-size: .8rem; text-transform: uppercase; letter-spacing: .15em; }
-/* flashed event card in the lane */
+.play-idle { text-align: center; color: var(--cream-2); display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+.play-idle .pi-main { font-family: var(--display); font-size: clamp(1.4rem, 2.6vw, 2.2rem); color: var(--cream); opacity: .85; }
+.play-idle .pi-sub { font-size: .85rem; text-transform: uppercase; letter-spacing: .12em; opacity: .7; }
+.play-idle.mine .pi-main { color: var(--bill); }
+/* dramatic event flash in the center */
 .event-flash { text-align: center; animation: stampIn .4s ease-out; }
-.event-flash .ef-card { width: 150px; aspect-ratio: 3/4; margin: 0 auto 12px; border-radius: 12px; border: 3px solid var(--ink); background-size: cover; background-position: center; background-color: var(--cream); box-shadow: 0 8px 0 rgba(0,0,0,.3); }
-.event-flash .ef-title { font-family: var(--display); font-size: 1.6rem; color: var(--cream); text-shadow: 2px 2px 0 var(--ink); }
-.event-flash .ef-sub { color: var(--cream-2); font-size: .9rem; margin-top: 4px; }
+.event-flash .ef-card { width: clamp(150px, 22vh, 220px); aspect-ratio: 3/4; margin: 0 auto 14px; border-radius: 14px; border: 3px solid var(--ink); background-size: cover; background-position: center; background-color: var(--cream); box-shadow: 0 12px 0 rgba(0,0,0,.3); }
+.event-flash .ef-title { font-family: var(--display); font-size: clamp(1.6rem, 3vw, 2.4rem); color: var(--cream); text-shadow: 2px 2px 0 var(--ink); }
+.event-flash .ef-sub { color: var(--cream-2); font-size: 1rem; margin-top: 6px; }
+
+/* bottom-center action bar (on your turn) */
+.stage-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; min-height: 8px; }
+.stage-actions .btn { font-size: 1rem; padding: 12px 20px; }
+.stage-actions .trade-help { width: 100%; text-align: center; color: var(--cream-2); font-size: .85rem; }
+.stage-actions .hintline { color: var(--cream-2); font-size: .85rem; }
+
+/* flying-card animation layer */
+.fly-layer { position: fixed; inset: 0; pointer-events: none; z-index: 90; }
+.fly-card {
+  position: fixed; border-radius: 9px; border: 2px solid var(--ink);
+  background-color: var(--cream); background-size: cover; background-position: center;
+  box-shadow: 0 12px 28px rgba(0,0,0,.5); transform-origin: center center; will-change: transform;
+}
 
 /* ---------- right rail panels ---------- */
 .rail-right { display: grid; grid-template-rows: 1fr auto auto; gap: 12px; }

@@ -125,6 +125,7 @@ function renderGame() {
   renderPlayers();
   renderMine();
   renderControls();
+  renderPlayArea();
   renderLog();
   renderOverlay();
   handleFx();
@@ -165,6 +166,7 @@ function renderPlayers() {
   for (const p of ordered) {
     const el = document.createElement('div');
     el.className = 'player paper';
+    el.dataset.pid = p.id;
     if (p.id === g.turnPlayerId) el.classList.add('active');
     if (g.pending && g.pending.targetId === p.id) el.classList.add('target');
     if (!p.connected) el.classList.add('off');
@@ -225,16 +227,12 @@ function cardEl(card, selectable) {
 // ---- controls (PRE_DRAW) ----
 function renderControls() {
   const g = view.game, p = me();
-  const c = $('controls'); c.innerHTML = '';
+  const c = $('stageActions'); c.innerHTML = '';
   if (g.phase === 'GAME_OVER') {
     if (playerId === view.hostId) c.appendChild(btn('Rematch', 'btn-primary', () => sendWs('rematch')));
-    else c.appendChild(hint('Waiting for host to start a rematch…'));
     return;
   }
-  if (g.phase !== 'PRE_DRAW' || !isMyTurn()) {
-    c.appendChild(hint(g.phase === 'PRE_DRAW' ? 'Waiting for your turn…' : 'Resolving Big Boy…'));
-    return;
-  }
+  if (g.phase !== 'PRE_DRAW' || !isMyTurn()) return; // play-area shows status
 
   if (tradeMode) {
     const total = [...tradeSel].reduce((s, id) => s + (cardMeta[p.regular.find((x) => x.id === id)?.kind]?.points || 0), 0);
@@ -338,7 +336,8 @@ function handleFx() {
   for (const f of fresh) {
     if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
     // DRAW and TURN go through the sequential queue (after the Draw click).
-    else if (f.type === 'DRAW') { enqueueSound(drawSound(f.kind)); }
+    else if (f.type === 'DRAW') { enqueueSound(drawSound(f.kind)); flyDraw({ faceKind: f.kind, toEl: $('myRegular') }); }
+    else if (f.type === 'DRAW_HIDDEN') { if (f.actorId !== playerId) flyDraw({ faceKind: null, toEl: playerPanel(f.actorId) }); }
     else if (f.type === 'TURN') { enqueueSound('turn'); }
     else playSound(fxSound(f.type));
     if (f.type === 'BIG_BOY') slamOverlay();
@@ -346,10 +345,65 @@ function handleFx() {
   }
 }
 
+function playerPanel(id) { return document.querySelector(`.player[data-pid="${id}"]`); }
+
+// Animate a card from the goose deck, big through the center, to a destination.
+function flyDraw({ faceKind, toEl }) {
+  const deck = $('gooseDraw'), play = $('playArea');
+  if (!deck || !play) return;
+  const fr = deck.getBoundingClientRect(), pr = play.getBoundingClientRect();
+  const w = fr.width, h = fr.height;
+  const startCx = fr.left + w / 2, startCy = fr.top + h / 2;
+  const cdx = (pr.left + pr.width / 2) - startCx, cdy = (pr.top + pr.height / 2) - startCy;
+  const tr = (toEl || play).getBoundingClientRect();
+  const ddx = (tr.left + tr.width / 2) - startCx, ddy = (tr.top + tr.height / 2) - startCy;
+  const bigScale = Math.max(1.6, Math.min(4, (pr.height * 0.42) / h));
+  const destScale = toEl ? Math.max(0.5, (tr.height * 0.8) / h) : 1;
+
+  const card = document.createElement('div');
+  card.className = 'fly-card';
+  const kind = faceKind || 'GOOSE_CARD_BACK';
+  if (hasArt(kind)) card.style.backgroundImage = `url(${artUrl[kind]})`;
+  else card.style.backgroundColor = faceKind ? (cardMeta[faceKind]?.color || '#caa') : '#1a3328';
+  Object.assign(card.style, { left: `${fr.left}px`, top: `${fr.top}px`, width: `${w}px`, height: `${h}px` });
+  $('flyLayer').appendChild(card);
+
+  const anim = card.animate([
+    { transform: 'translate(0,0) scale(1)', opacity: 0.5 },
+    { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1, offset: 0.22 },
+    { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1, offset: 0.68 },
+    { transform: `translate(${ddx}px,${ddy}px) scale(${destScale})`, opacity: 0.85 },
+  ], { duration: 1500, easing: 'cubic-bezier(.4,1.2,.5,1)', fill: 'forwards' });
+  anim.onfinish = () => card.remove();
+  anim.oncancel = () => card.remove();
+}
+
 function slamOverlay() {
   const card = document.querySelector('.overlay-card');
   if (!card) return;
   card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
+}
+
+// ---- center play area: idle status + dramatic event flashes ----
+let laneBusy = false;
+function lastMove() {
+  const l = view.game.log;
+  for (let i = l.length - 1; i >= 0; i--) { if (!/^It's /.test(l[i].text)) return l[i].text; }
+  return '';
+}
+function renderPlayArea() {
+  if (laneBusy) return;
+  const g = view.game, pa = $('playArea');
+  if (g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED') { pa.innerHTML = ''; return; }
+  let main, mine = false;
+  if (g.phase === 'GAME_OVER') { const w = g.players.find((x) => x.id === g.winnerId); main = w ? `${w.name} wins` : 'Game over'; }
+  else if (isMyTurn()) { main = 'Your move'; mine = true; }
+  else { main = `Waiting for ${g.players.find((x) => x.id === g.turnPlayerId)?.name || ''}…`; }
+  const last = lastMove();
+  pa.innerHTML = `<div class="play-idle${mine ? ' mine' : ''}">
+      <div class="pi-main">${esc(main)}</div>
+      ${last ? `<div class="pi-sub">Last: ${esc(last)}</div>` : ''}
+    </div>`;
 }
 
 const EVENT_FLASH = {
@@ -362,18 +416,16 @@ const EVENT_FLASH = {
 };
 function flashEvent(f) {
   const cfg = EVENT_FLASH[f.type]; if (!cfg) return;
-  const lane = $('eventLane');
+  const pa = $('playArea');
   const artCss = cfg.kind && hasArt(cfg.kind) ? `background-image:url(${artUrl[cfg.kind]})` : '';
-  lane.innerHTML = `<div class="event-flash">
+  pa.innerHTML = `<div class="event-flash">
       ${cfg.kind ? `<div class="ef-card" style="${artCss}"></div>` : ''}
       <div class="ef-title">${esc(cfg.title)}</div>
       <div class="ef-sub">${esc(cfg.sub(f))}</div>
     </div>`;
+  laneBusy = true;
   clearTimeout(laneTimer);
-  laneTimer = setTimeout(resetLane, 2400);
-}
-function resetLane() {
-  $('eventLane').innerHTML = '<div class="event-idle"><span class="event-idle-title">★ Event Lane ★</span><span class="event-idle-sub">Game-wide moments show up here</span></div>';
+  laneTimer = setTimeout(() => { laneBusy = false; renderPlayArea(); }, 2400);
 }
 
 // ---- log / chat ----
@@ -412,5 +464,4 @@ function toast(m) { const t = $('toast'); t.textContent = m; t.classList.remove(
 
 initAudio();
 syncSoundUI();
-resetLane();
 connect();

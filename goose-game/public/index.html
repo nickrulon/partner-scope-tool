@@ -73,22 +73,16 @@
           <div id="myWild" class="hand wildhand"></div>
           <div id="myRegular" class="hand"></div>
         </div>
-
-        <div id="controls" class="controls"></div>
       </aside>
 
-      <!-- CENTER STAGE -->
+      <!-- CENTER STAGE — the live play table -->
       <main class="stage">
         <div class="stage-head">
           <div id="turnBanner" class="turn-banner">Your turn</div>
           <div id="turnSub" class="turn-sub">get yer geese</div>
         </div>
-        <div id="eventLane" class="event-lane">
-          <div class="event-idle">
-            <span class="event-idle-title">★ Event Lane ★</span>
-            <span class="event-idle-sub">Game-wide moments show up here</span>
-          </div>
-        </div>
+        <div id="playArea" class="play-area"></div>
+        <div id="stageActions" class="stage-actions"></div>
       </main>
 
       <!-- RIGHT RAIL -->
@@ -124,6 +118,9 @@
     <div id="overlaySub" class="overlay-sub"></div>
     <div id="overlayControls" class="overlay-controls"></div>
   </div>
+
+  <!-- flying-card animation layer -->
+  <div id="flyLayer" class="fly-layer"></div>
 
   <div id="toast" class="toast hidden"></div>
   <script type="module" src="game.js"></script>
