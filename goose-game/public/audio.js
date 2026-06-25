@@ -34,6 +34,30 @@ function probe(name) {
 
 export function initAudio() { SOUND_NAMES.forEach(probe); }
 
+// --- Autoplay unlock -----------------------------------------------------
+// Browsers block Audio.play() on a fresh HTTPS origin until the user has
+// interacted with the page (localhost is exempt, which is why sounds work
+// locally but go silent when deployed). Most of our sounds fire from
+// WebSocket events (turn, Big Boy, draws) — outside any click handler — so
+// they hit that block. On the first real user gesture we "prime" playback by
+// starting a real (muted) clip inside the gesture; that grants the document
+// playback permission so later event-driven sounds are allowed.
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  const url = resolved['click'] || Object.values(resolved).find(Boolean);
+  if (!url) { probe('click'); return; } // nothing resolved yet — retry next gesture
+  try {
+    const a = new Audio(url);
+    a.volume = 0;
+    a.play().then(() => { audioUnlocked = true; a.pause(); a.currentTime = 0; }).catch(() => {});
+  } catch { /* ignore */ }
+}
+if (typeof window !== 'undefined') {
+  ['pointerdown', 'touchstart', 'mousedown', 'keydown'].forEach((ev) =>
+    window.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
+}
+
 export function playSound(name) {
   if (muted || !name) return;
   const url = resolved[name];
