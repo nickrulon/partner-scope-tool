@@ -5,9 +5,11 @@ Supported extensions (first one found wins): **mp3, ogg, wav, m4a**.
 
 | Filename (any ext) | Plays when… |
 |--------------------|-------------|
-| `click`     | a button is pressed |
-| `draw`      | a Goose card is drawn |
-| `honk`      | someone honks in chat |
+| `click`      | a button is pressed |
+| `drawgoose`  | you draw a **Goose** (1 pt) — plays only for you |
+| `drawgeese`  | you draw a **Geese** (2 pts) — plays only for you |
+| `drawgeeses` | you draw a **Geeses** (4 pts) — plays only for you |
+| `honk`       | someone honks in chat |
 | `bigboy`    | **Big Boy** is drawn (the big shared event) |
 | `lawnmower` | Lawn Mower is played |
 | `getgoosed` | Get Goosed is played |

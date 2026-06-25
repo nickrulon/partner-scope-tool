@@ -266,9 +266,10 @@ function draw(state) {
   }
 
   p.regular.push(card);
-  // Private — opponents never learn what you drew.
+  // Private — opponents never learn what you drew (log AND sound stay private,
+  // so the per-card draw sound can't reveal the card to the table).
   logMsg(state, `You drew a ${CARD_META[card.kind].name}.`, 'info', p.id);
-  emitFx(state, 'DRAW', { actor: p.name });
+  emitFx(state, 'DRAW', { actor: p.name, kind: card.kind, to: p.id });
   if (checkWin(state, p)) return { state };
   endTurn(state);
   return { state };
@@ -349,7 +350,7 @@ export function redact(state, viewerId) {
     options: state.options,
     // Private entries (a player's own draws) are hidden from everyone else.
     log: state.log.filter((e) => !e.to || e.to === viewerId).slice(-40),
-    fx: state.fx.slice(-8),
+    fx: state.fx.filter((f) => !f.to || f.to === viewerId).slice(-8),
     players: state.players.map((p) => {
       const isMe = p.id === viewerId;
       return {

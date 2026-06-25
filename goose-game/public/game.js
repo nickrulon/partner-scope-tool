@@ -3,7 +3,7 @@
 // Card art loads from cards/<KIND>.png; sounds from sounds/<event>.<ext>.
 
 import {
-  initAudio, playSound, fxSound, setMuted, isMuted, setVolume, getVolume,
+  initAudio, playSound, fxSound, drawSound, setMuted, isMuted, setVolume, getVolume,
 } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -337,6 +337,7 @@ function handleFx() {
   lastFxId = fx.reduce((m, f) => Math.max(m, f.id), lastFxId);
   for (const f of fresh) {
     if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
+    else if (f.type === 'DRAW') { playSound(drawSound(f.kind)); }
     else playSound(fxSound(f.type));
     if (f.type === 'BIG_BOY') slamOverlay();
     else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) flashEvent(f);

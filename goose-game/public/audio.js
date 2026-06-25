@@ -4,8 +4,9 @@
 // silently a no-op. Mute + volume persist in localStorage.
 
 const SOUND_NAMES = [
-  'click', 'draw', 'honk', 'bigboy', 'lawnmower', 'getgoosed',
-  'goosegang', 'turn', 'win', 'lose', 'trade', 'announce', 'goosed',
+  'click', 'drawgoose', 'drawgeese', 'drawgeeses', 'honk', 'bigboy',
+  'lawnmower', 'getgoosed', 'goosegang', 'turn', 'win', 'lose',
+  'trade', 'announce', 'goosed',
 ];
 const EXTS = ['mp3', 'ogg', 'wav', 'm4a'];
 
@@ -47,10 +48,14 @@ export function playSound(name) {
 // Map server fx event types -> sound names.
 const FX_SOUND = {
   BIG_BOY: 'bigboy', LAWN_MOWER: 'lawnmower', GET_GOOSED: 'getgoosed',
-  GOOSE_GANG: 'goosegang', DRAW: 'draw', TRADE: 'trade', ANNOUNCE: 'announce',
+  GOOSE_GANG: 'goosegang', TRADE: 'trade', ANNOUNCE: 'announce',
   TURN: 'turn', WIN: 'win', PENALTY: 'goosed', ABSORB: 'goosed',
 };
 export function fxSound(type) { return FX_SOUND[type] || null; }
+
+// Per-card draw sounds (Goose=1, Geese=2, Geeses=4).
+const DRAW_SOUND = { GOOSE: 'drawgoose', GEESE: 'drawgeese', GEESES: 'drawgeeses' };
+export function drawSound(kind) { return DRAW_SOUND[kind] || null; }
 
 export function setMuted(v) { muted = !!v; localStorage.setItem('goose_muted', muted ? '1' : '0'); }
 export function isMuted() { return muted; }

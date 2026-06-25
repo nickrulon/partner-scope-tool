@@ -164,6 +164,17 @@ console.log('\n== Opponents cannot see your score ==');
   ok(bView.players.find((x) => x.id === 'B').score != null, 'B sees own score');
 }
 
+console.log('\n== Draw fx is private + carries the card kind ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 18 });
+  stackGoose(g, ['GEESES']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  const aDraw = redact(g, 'A').fx.find((f) => f.type === 'DRAW');
+  const bDraw = redact(g, 'B').fx.find((f) => f.type === 'DRAW');
+  ok(aDraw && aDraw.kind === 'GEESES', 'A gets a DRAW fx tagged GEESES');
+  ok(!bDraw, 'B never receives the DRAW fx (no sound leak)');
+}
+
 console.log('\n== Big Boy draw IS public + emits an fx event ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 16 });
