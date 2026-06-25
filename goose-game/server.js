@@ -121,6 +121,7 @@ function handle(ws, type, payload) {
   switch (type) {
     case 'create':    return doCreate(ws, payload);
     case 'join':      return doJoin(ws, payload);
+    case 'start':     return doStart(ws, payload);
     case 'vote':      return doVote(ws, payload);
     case 'addbot':    return doAddBot(ws, payload);
     case 'removebot': return doRemoveBot(ws, payload);
@@ -181,7 +182,7 @@ function doConfig(ws, payload) {
 
 function doVote(ws, { candidateId }) {
   const room = getRoom(ws.meta.roomCode);
-  if (!room || room.game || room.decided) return;          // voting locked once decided
+  if (!room || room.game) return;                          // you can still change your vote
   if (!room.members.has(candidateId)) return;
   room.votes.set(ws.meta.playerId, candidateId);
   afterVoteChange(room);
@@ -194,7 +195,7 @@ const BOT_NAMES = [
 ];
 function doAddBot(ws) {
   const room = getRoom(ws.meta.roomCode);
-  if (!room || room.game || room.decided) return;
+  if (!room || room.game) return;
   if (ws.meta.playerId !== room.hostId) return send(ws, 'error', { message: 'Only the host can add computers.' });
   if (room.members.size >= 8) return send(ws, 'error', { message: 'The pond is full (8 geese max).' });
   const used = new Set([...room.members.values()].map((m) => m.name));
@@ -205,7 +206,7 @@ function doAddBot(ws) {
 }
 function doRemoveBot(ws, { botId }) {
   const room = getRoom(ws.meta.roomCode);
-  if (!room || room.game || room.decided) return;
+  if (!room || room.game) return;
   if (ws.meta.playerId !== room.hostId) return;
   const m = room.members.get(botId);
   if (!m || !m.isBot) return;
@@ -248,18 +249,27 @@ function voteResult(room) {
 }
 
 function afterVoteChange(room) {
-  if (room.game || room.decided) return;
+  if (room.game) return;
   botsVote(room);
   const cand = voteResult(room);
-  if (cand) {
-    const m = room.members.get(cand);
-    room.decided = { id: cand, name: m ? m.name : 'someone' };
-    broadcast(room);
-    clearTimeout(room.startTimer);
-    room.startTimer = setTimeout(() => startGameFromVote(room), 3000);
-  } else {
-    broadcast(room);
+  // `decided` just means "the vote is unanimous" — it enables the host's Start
+  // button. It clears again if someone changes their vote and breaks the tie.
+  room.decided = cand ? { id: cand, name: room.members.get(cand)?.name || 'someone' } : null;
+  broadcast(room);
+}
+
+// Host pressed Start — only allowed once the silliest-goose vote is unanimous.
+function doStart(ws) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room || room.game) return;
+  if (ws.meta.playerId !== room.hostId) return send(ws, 'error', { message: 'Only the host can start.' });
+  if ([...room.members.values()].filter(isConnected).length < 2) {
+    return send(ws, 'error', { message: 'Need at least 2 geese to goose.' });
   }
+  const winner = voteResult(room);
+  if (!winner) return send(ws, 'error', { message: 'Everyone has to agree on the silliest goose first.' });
+  room.decided = { id: winner, name: room.members.get(winner)?.name || 'someone' };
+  startGameFromVote(room);
 }
 
 function startGameFromVote(room) {

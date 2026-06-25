@@ -132,6 +132,7 @@ input::placeholder { color: #9a8d6e; }
 .voter-chip { font-size: .66rem; background: var(--pond-light); color: var(--cream); border-radius: 10px; padding: 2px 8px; }
 .host-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
 .host-controls .check { margin-bottom: 0; }
+.start-hint { font-size: .72rem; color: var(--ink-soft); text-align: center; margin: -4px 0 0; min-height: 1em; }
 .decided { text-align: center; padding: 14px 10px 6px; animation: fadeIn .4s; }
 .decided-head { font-family: var(--display); font-size: 1.6rem; color: var(--bill-dark); }
 .decided-body { font-size: 1rem; color: var(--ink); margin-top: 6px; }

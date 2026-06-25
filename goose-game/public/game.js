@@ -63,6 +63,7 @@ $('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $(
 $('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value || 'Goose', playerId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
+$('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
 $('boutaRule').onchange = (e) => sendWs('config', { boutaGooseRule: e.target.checked });
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -114,16 +115,15 @@ function renderWaiting() {
   const votes = view.votes || {};            // voterId -> candidateId
   const myVote = votes[playerId] || null;
 
-  // Once it's decided, swap the vote UI for the announcement.
+  // `decided` = the vote is unanimous. The vote stays visible and changeable
+  // (changing it breaks the tie) — it just enables the host's Start button.
   const decided = view.decided;
   $('decidedMsg').classList.toggle('hidden', !decided);
-  $('voteList').classList.toggle('hidden', !!decided);
-  $('voteExplain').classList.toggle('hidden', !!decided);
   if (decided) {
     $('decidedMsg').innerHTML =
-      `<div class="decided-head">It's been decided.</div>
-       <div class="decided-body">The group has decided that <strong>${esc(decided.name)}</strong> is the silliest goose.</div>
-       <div class="decided-foot">${esc(decided.name)} goes first — flap yer wings…</div>`;
+      `<div class="decided-head">It's been decided!</div>
+       <div class="decided-body">The group agrees that <strong>${esc(decided.name)}</strong> is the silliest goose.</div>
+       <div class="decided-foot">${esc(decided.name)} will go first${isHost ? ' — press Start!' : ''}</div>`;
   }
 
   // Build a vote card per goose: name + everyone currently voting for them.
@@ -140,12 +140,11 @@ function renderWaiting() {
          <span class="vc-count">${voters.length || ''}</span>
        </div>
        <div class="vc-voters">${voters.map((v) => `<span class="voter-chip">${esc(v.name)}${v.id === playerId ? ' (you)' : ''}</span>`).join('')}</div>`;
-    if (!decided) {
-      card.classList.add('clickable');
-      card.onclick = () => { playSound('click'); sendWs('vote', { candidateId: m.id }); };
-    }
+    // You can always (re)cast your vote, even after it's unanimous.
+    card.classList.add('clickable');
+    card.onclick = () => { playSound('click'); sendWs('vote', { candidateId: m.id }); };
     // remove-computer control for the host
-    if (isHost && m.isBot && !decided) {
+    if (isHost && m.isBot) {
       const x = document.createElement('button');
       x.className = 'vc-remove'; x.textContent = '✕'; x.title = 'Remove this computer';
       x.onclick = (e) => { e.stopPropagation(); playSound('click'); sendWs('removebot', { botId: m.id }); };
@@ -154,17 +153,26 @@ function renderWaiting() {
     list.appendChild(card);
   }
 
-  $('hostControls').classList.toggle('hidden', !isHost || !!decided);
+  $('hostControls').classList.toggle('hidden', !isHost);
   $('boutaRule').checked = view.boutaGooseRule !== false;
   $('boutaRule').disabled = !isHost;
+  // Start is the host's button, enabled only once the vote is unanimous.
+  $('startBtn').disabled = !decided;
+  $('startHint').textContent = decided
+    ? ''
+    : (view.members.length < 2 ? 'Add a computer (or share the code) — you need at least 2 geese.' : 'Everyone must agree on the silliest goose first.');
 
   const voteCount = Object.keys(votes).length;
   const total = view.members.length;
-  if (decided) $('waitHint').textContent = 'Starting…';
-  else if (total < 2) $('waitHint').textContent = isHost ? 'Need at least 2 geese — add a computer or share the code.' : 'Waiting for more geese…';
-  else $('waitHint').textContent = myVote
-    ? `Waiting for everyone to agree… (${voteCount}/${total} voted)`
-    : 'Tap a goose to cast your vote.';
+  if (decided) {
+    $('waitHint').textContent = isHost ? '' : `Waiting for the host to start… (${esc(decided.name)} goes first)`;
+  } else if (total < 2) {
+    $('waitHint').textContent = isHost ? '' : 'Waiting for more geese…';
+  } else {
+    $('waitHint').textContent = myVote
+      ? `Not unanimous yet… (${voteCount}/${total} voted)`
+      : 'Tap a goose to vote for the silliest.';
+  }
 }
 
 const me = () => view.game.players.find((p) => p.id === playerId);
