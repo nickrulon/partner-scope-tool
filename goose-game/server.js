@@ -64,15 +64,23 @@ function broadcast(room) {
     if (m.isBot || !m.ws || m.ws.readyState !== m.ws.OPEN) continue; // bots have no socket
     send(m.ws, 'state', roomView(room, m.playerId));
   }
+  // Spectators see the same public projection: redact() with their (non-player)
+  // id hides every hand, score, private draw, and private fx automatically.
+  for (const s of (room.spectators || new Map()).values()) {
+    if (!s.ws || s.ws.readyState !== s.ws.OPEN) continue;
+    send(s.ws, 'state', roomView(room, s.id, true));
+  }
 }
 
 const isConnected = (m) => m.isBot || (m.ws && m.ws.readyState === m.ws.OPEN);
 
-function roomView(room, viewerId) {
+function roomView(room, viewerId, asSpectator = false) {
   return {
     code: room.code,
     hostId: room.hostId,
     started: !!room.game,
+    spectator: asSpectator,
+    spectatorCount: (room.spectators || new Map()).size,
     boutaGooseRule: room.boutaGooseRule !== false,
     // Pre-game "silliest goose" vote: who voted for whom, and the result.
     votes: Object.fromEntries(room.votes || []),
@@ -80,12 +88,13 @@ function roomView(room, viewerId) {
     members: [...room.members.values()].map((m) => ({
       id: m.playerId, name: m.name, connected: isConnected(m), isBot: !!m.isBot,
     })),
+    // viewerId is the spectator's own (non-player) id, so nothing private leaks.
     game: room.game ? redact(room.game, viewerId) : null,
   };
 }
 
 function send(ws, type, payload) {
-  if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type, payload }));
+  if (ws && ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type, payload }));
 }
 
 // --- WebSocket protocol --------------------------------------------------
@@ -106,6 +115,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const room = getRoom(ws.meta.roomCode);
     if (!room) return;
+    if (ws.meta.isSpectator) { room.spectators.delete(ws.meta.playerId); broadcast(room); return; }
     const m = room.members.get(ws.meta.playerId);
     if (m && m.ws === ws) {
       if (room.game) {
@@ -121,6 +131,7 @@ function handle(ws, type, payload) {
   switch (type) {
     case 'create':    return doCreate(ws, payload);
     case 'join':      return doJoin(ws, payload);
+    case 'spectate':  return doSpectate(ws, payload);
     case 'start':     return doStart(ws, payload);
     case 'vote':      return doVote(ws, payload);
     case 'addbot':    return doAddBot(ws, payload);
@@ -151,7 +162,7 @@ function doCreate(ws, { name, playerId }) {
   const room = {
     code, hostId: pid, members: new Map(), game: null, lastWinnerId: null,
     votes: new Map(), decided: null, boutaGooseRule: true,
-    botTimer: null, startTimer: null,
+    botTimer: null, startTimer: null, spectators: new Map(),
   };
   rooms.set(code, room);
   joinRoom(ws, room, pid, (name || 'Goose').slice(0, 20));
@@ -171,6 +182,21 @@ function doJoin(ws, { code, name, playerId }) {
 // --- Silliest-goose vote ------------------------------------------------
 // The game can't start until everyone unanimously clicks the same goose.
 // That goose goes first; turns then follow join order, wrapping around.
+
+// Spectators watch a room without ever becoming a player or a seat. They get
+// the same public projection as everyone else (redacted with their own
+// non-player id), can watch a game already in progress, and never vote/act.
+function doSpectate(ws, { code, name, playerId }) {
+  const room = getRoom(code);
+  if (!room) return send(ws, 'error', { message: 'No room with that code to watch.' });
+  const sid = (typeof playerId === 'string' && playerId.startsWith('s_'))
+    ? playerId : `s_${Math.random().toString(36).slice(2, 9)}`;
+  ws.meta = { roomCode: room.code, playerId: sid, isSpectator: true };
+  room.spectators.set(sid, { id: sid, name: (name || 'Spectator').slice(0, 20), ws });
+  send(ws, 'joined', { code: room.code, playerId: sid, hostId: room.hostId, spectator: true });
+  send(ws, 'state', roomView(room, sid, true));
+  broadcast(room); // let players see the spectator count tick up
+}
 
 function doConfig(ws, payload) {
   const room = getRoom(ws.meta.roomCode);
@@ -374,11 +400,12 @@ function doAction(ws, { action }) {
 function doChat(ws, { text }) {
   const room = getRoom(ws.meta.roomCode);
   if (!room) return;
-  const m = room.members.get(ws.meta.playerId);
+  const m = room.members.get(ws.meta.playerId) || room.spectators.get(ws.meta.playerId);
   if (!m || !text) return;
-  for (const other of room.members.values()) {
-    send(other.ws, 'chat', { from: m.name, text: String(text).slice(0, 200) });
-  }
+  const from = m.name + (room.spectators.has(ws.meta.playerId) ? ' (watching)' : '');
+  const msg = { from, text: String(text).slice(0, 200) };
+  for (const other of room.members.values()) send(other.ws, 'chat', msg); // send() ignores botless/closed sockets
+  for (const s of room.spectators.values()) send(s.ws, 'chat', msg);
 }
 
 httpServer.listen(PORT, () => {

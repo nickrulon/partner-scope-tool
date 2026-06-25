@@ -360,10 +360,40 @@ input::placeholder { color: #9a8d6e; }
 @keyframes stampIn { 0% { transform: scale(1.8) rotate(-6deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; } }
 
+/* ---------- audience / spectator view ---------- */
+.watch-btn { background: transparent; color: var(--ink); border-color: var(--paper-edge); margin-top: 12px; }
+.watch-btn:hover { border-color: var(--bill); }
+.spec-badge { font-size: .62rem; font-weight: bold; letter-spacing: .12em; color: #2a1500; background: var(--bill); border-radius: 5px; padding: 2px 7px; text-transform: uppercase; }
+/* Spectators have no hand and no actions; scores are private even to them. */
+.spectating .myhand { display: none; }
+.spectating .stage-actions { display: none; }
+.spectating .pscore { display: none; }
+.spectating .player { cursor: default; }
+/* the live stage is the broadcast focus */
+.spectating .play-area { border-style: solid; border-color: rgba(224,122,46,.35); }
+.spec-panel-toggle { display: none; }
+
 /* ---------- responsive ---------- */
 @media (max-width: 1040px) {
   .table { grid-template-columns: 1fr; grid-auto-rows: min-content; overflow-y: auto; }
   .rail { overflow: visible; }
   .rail-right { grid-template-rows: none; }
   .stage { min-height: 360px; }
+
+  /* Audience on a phone: lead with the live stage + turn status, then the
+     roster/decks. Log & chat live in a bottom sheet behind a toggle so the
+     table stays the focus. */
+  body.spectating .stage { order: -1; min-height: 300px; }
+  body.spectating .spec-panel-toggle {
+    display: block; position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+    z-index: 110; background: var(--bill); color: #2a1500; border-color: var(--bill-dark);
+    font-weight: bold; text-transform: uppercase; letter-spacing: .05em; box-shadow: 0 4px 14px rgba(0,0,0,.5);
+  }
+  body.spectating .rail-right { display: none; }
+  body.spectating.spec-panels-open .rail-right {
+    display: grid; position: fixed; left: 0; right: 0; bottom: 0; z-index: 109;
+    max-height: 64vh; overflow-y: auto; padding: 14px 12px 60px;
+    background: var(--pond-deep); border-top: 3px solid var(--bill);
+    box-shadow: 0 -8px 24px rgba(0,0,0,.5);
+  }
 }

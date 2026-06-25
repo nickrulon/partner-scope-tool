@@ -25,6 +25,7 @@
           <input id="codeInput" maxlength="4" placeholder="CODE" class="code-input" />
           <button id="joinBtn" class="btn">Join</button>
         </div>
+        <button id="watchBtn" class="btn block watch-btn">Watch a Game (spectate)</button>
         <p id="lobbyErr" class="err"></p>
       </div>
     </div>
@@ -56,7 +57,7 @@
   <section id="game" class="screen hidden">
     <header class="topbar paper">
       <div class="brand">Quit Goosin' <span>Around!</span></div>
-      <div class="room-strip">Game Room: <strong id="gRoomName">the pond</strong> · <span id="gPlayerCount">2 geese</span></div>
+      <div class="room-strip">Game Room: <strong id="gRoomName">the pond</strong> · <span id="gPlayerCount">2 geese</span> <span id="specBadge" class="spec-badge hidden">WATCHING</span></div>
       <button id="soundToggle" class="btn btn-icon" title="Toggle sound">SOUND: ON</button>
     </header>
 
@@ -127,6 +128,9 @@
 
   <!-- flying-card animation layer -->
   <div id="flyLayer" class="fly-layer"></div>
+
+  <!-- audience view: mobile-only toggle for the log/chat bottom sheet -->
+  <button id="specPanelToggle" class="spec-panel-toggle hidden">Log &amp; Chat</button>
 
   <div id="toast" class="toast hidden"></div>
   <script type="module" src="game.js"></script>

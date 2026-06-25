@@ -11,7 +11,12 @@ const PID_KEY = 'goose_pid';
 let playerId = localStorage.getItem(PID_KEY) || `p${Math.random().toString(36).slice(2, 9)}`;
 localStorage.setItem(PID_KEY, playerId);
 
+const SID_KEY = 'goose_sid';
+let spectatorId = localStorage.getItem(SID_KEY) || `s_${Math.random().toString(36).slice(2, 9)}`;
+localStorage.setItem(SID_KEY, spectatorId);
+
 let ws, cardMeta = {}, view = null;
+let spectating = false;            // true while watching a game as audience
 let tradeMode = false, tradeSel = new Set();
 let targetMode = null;            // lawn-mower targeting (click a player)
 let goosedChoosing = false;       // get-goosed target picker inside overlay
@@ -61,6 +66,7 @@ function sendWs(type, payload = {}) { ws.readyState === 1 && ws.send(JSON.string
 // ---- lobby wiring ----
 $('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $('nameInput').value || 'Goose', playerId }); };
 $('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value || 'Goose', playerId }); };
+$('watchBtn').onclick = () => { playSound('click'); sendWs('spectate', { code: $('codeInput').value, name: $('nameInput').value || 'Spectator', playerId: spectatorId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
@@ -75,6 +81,7 @@ function syncSoundUI() {
   $('muteToggle').checked = isMuted();
   $('volSlider').value = Math.round(getVolume() * 100);
 }
+$('specPanelToggle').onclick = () => { playSound('click'); document.body.classList.toggle('spec-panels-open'); };
 $('soundToggle').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isMuted()) playSound('click'); };
 $('muteToggle').onchange = (e) => { setMuted(e.target.checked); syncSoundUI(); };
 $('volSlider').oninput = (e) => { setVolume(e.target.value / 100); };
@@ -86,6 +93,8 @@ function rerender() { if (view) render(); }
 
 function render() {
   if (!view) return;
+  spectating = !!view.spectator;
+  document.body.classList.toggle('spectating', spectating);
   if (!view.code) { resetTransient(); showScreen('lobby'); return; }
   if (!view.game) { resetTransient(); renderWaiting(); showScreen('waiting'); return; }
   renderGame();
@@ -140,9 +149,12 @@ function renderWaiting() {
          <span class="vc-count">${voters.length || ''}</span>
        </div>
        <div class="vc-voters">${voters.map((v) => `<span class="voter-chip">${esc(v.name)}${v.id === playerId ? ' (you)' : ''}</span>`).join('')}</div>`;
-    // You can always (re)cast your vote, even after it's unanimous.
-    card.classList.add('clickable');
-    card.onclick = () => { playSound('click'); sendWs('vote', { candidateId: m.id }); };
+    // You can always (re)cast your vote, even after it's unanimous — but a
+    // spectator only watches, so no click handler for them.
+    if (!spectating) {
+      card.classList.add('clickable');
+      card.onclick = () => { playSound('click'); sendWs('vote', { candidateId: m.id }); };
+    }
     // remove-computer control for the host
     if (isHost && m.isBot) {
       const x = document.createElement('button');
@@ -161,6 +173,14 @@ function renderWaiting() {
   $('startHint').textContent = decided
     ? ''
     : (view.members.length < 2 ? 'Add a computer (or share the code) — you need at least 2 geese.' : 'Everyone must agree on the silliest goose first.');
+
+  // Spectator watching the lobby: read-only, with a clear "watching" framing.
+  if (spectating) {
+    $('voteExplain').innerHTML = `You're <strong>watching</strong> this pond. The geese are voting on who's the <strong>silliest</strong> — the game will begin once they agree.`;
+    $('waitHint').textContent = decided ? `Waiting for the host to start… (${esc(decided.name)} goes first)` : 'Watching the vote…';
+    return;
+  }
+  $('voteExplain').innerHTML = `Click the goose you reckon is the <strong>silliest</strong>. The game starts only once it's <strong>unanimous</strong> — and that goose goes first.`;
 
   const voteCount = Object.keys(votes).length;
   const total = view.members.length;
@@ -182,6 +202,11 @@ function renderGame() {
   const g = view.game;
   $('gRoomName').textContent = view.code;
   $('gPlayerCount').textContent = `${g.players.length} geese`;
+  // Spectator badge in the top bar.
+  $('specBadge').classList.toggle('hidden', !spectating);
+  $('specPanelToggle').classList.toggle('hidden', !spectating);
+  if (spectating) $('specBadge').textContent = `WATCHING${view.spectatorCount > 1 ? ` · ${view.spectatorCount} viewers` : ''}`;
+  else document.body.classList.remove('spec-panels-open');
 
   applyPile('gooseDraw', g.gooseDrawCount, PILE_BACKS.gooseDraw);
   applyPile('wildDraw', g.wildDrawCount, PILE_BACKS.wildDraw);
@@ -231,8 +256,8 @@ function applyPile(elId, count, backKind) {
 function renderPlayers() {
   const g = view.game;
   const box = $('players'); box.innerHTML = '';
-  // viewer first, then others in seat order
-  const ordered = [me(), ...g.players.filter((p) => p.id !== playerId)];
+  // Players: viewer first, then others. Spectators have no seat → seat order.
+  const ordered = spectating ? g.players.slice() : [me(), ...g.players.filter((p) => p.id !== playerId)];
   for (const p of ordered) {
     const el = document.createElement('div');
     el.className = 'player paper';
@@ -259,6 +284,7 @@ function renderPlayers() {
 }
 
 function renderMine() {
+  if (spectating) return;           // spectators have no hand
   const p = me();
   const wild = $('myWild'); wild.innerHTML = '';
   (p.wild || []).forEach((c) => wild.appendChild(cardEl(c, false)));
@@ -312,8 +338,9 @@ function cardEl(card, selectable) {
 
 // ---- controls (PRE_DRAW) ----
 function renderControls() {
-  const g = view.game, p = me();
   const c = $('stageActions'); c.innerHTML = '';
+  if (spectating) return;           // spectators can't act
+  const g = view.game, p = me();
   if (g.phase === 'GAME_OVER') {
     if (playerId === view.hostId) c.appendChild(btn('Rematch', 'btn-primary', () => sendWs('rematch')));
     return;
@@ -477,7 +504,7 @@ function handleFx() {
   const myTradeReveal = fresh.some((f) => f.type === 'TRADE_REVEAL');
 
   for (const f of fresh) {
-    if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
+    if (f.type === 'WIN') { playSound(spectating ? 'win' : (f.actor === me()?.name ? 'win' : 'lose')); }
     // Your own draw: play your private per-card sound, fly it big into center,
     // hold it ~3s so you can read it, then sail it into your gaggle.
     else if (f.type === 'DRAW') {
