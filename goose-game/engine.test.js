@@ -1,7 +1,7 @@
 // Lightweight engine tests — no framework, just `node goose-game/engine.test.js`.
 // Validates the core rules in GOOSE_GAME_DESIGN.md against the pure engine.
 
-import { createGame, applyAction, score, makeRng } from './engine.js';
+import { createGame, applyAction, score, makeRng, redact } from './engine.js';
 import { CARD_META } from './cards.js';
 
 let pass = 0, fail = 0;
@@ -128,6 +128,40 @@ console.log('\n== Win succeeds after announcing ==');
   applyAction(g, 'A', { type: 'DRAW' });
   eq(g.winnerId, 'A', 'A wins after announcing');
   eq(g.phase, 'GAME_OVER', 'game over');
+}
+
+console.log('\n== Announcing revokes if score drops below 17 ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 14, boutaGooseRule: true });
+  g.players[0].regular = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, kind: 'GEESE' })); // 18
+  applyAction(g, 'A', { type: 'ANNOUNCE_GOOSE' });
+  ok(g.players[0].announcedBoutaGoose, 'A announced at 18');
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  applyAction(g, 'A', { type: 'RESPOND', response: 'absorb' });
+  ok(!g.players[0].announcedBoutaGoose, 'announcement revoked after Big Boy dropped A below 17');
+}
+
+console.log('\n== Opponents never see what you drew (private log) ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 15 });
+  stackGoose(g, ['GEESES']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  const aSees = redact(g, 'A').log.some((e) => /you drew/i.test(e.text));
+  const bSees = redact(g, 'B').log.some((e) => /drew a/i.test(e.text));
+  ok(aSees, 'A sees their own draw');
+  ok(!bSees, 'B does NOT see what A drew');
+}
+
+console.log('\n== Big Boy draw IS public + emits an fx event ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 16 });
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  const bSees = redact(g, 'B').log.some((e) => /big boy/i.test(e.text));
+  const fx = redact(g, 'B').fx.some((f) => f.type === 'BIG_BOY');
+  ok(bSees, 'B sees the Big Boy draw');
+  ok(fx, 'a BIG_BOY fx event was emitted');
 }
 
 console.log('\n== Defending champion starts with Great Honkeror (+2) ==');

@@ -68,6 +68,8 @@ export function createGame(players, options = {}) {
     honkerorHolderId: options.honkerorHolderId || null,
     winnerId: null,
     log: [],
+    fx: [],
+    fxSeq: 0,
   };
 
   // Defending champion starts holding The Great Honkeror (+2).
@@ -81,13 +83,33 @@ export function createGame(players, options = {}) {
     ? options.firstSeat
     : Math.floor(rng() * state.players.length);
 
-  logMsg(state, `Game on! ${state.players[state.turnIndex].name} is the silliest goose — they go first. 🪿`);
+  logMsg(state, `Game on! ${state.players[state.turnIndex].name} is the silliest goose — they go first.`);
   return state;
 }
 
-function logMsg(state, text, kind = 'info') {
-  state.log.push({ t: Date.now(), text, kind });
+function logMsg(state, text, kind = 'info', to = null) {
+  // `to` = a playerId means the entry is private to that player (hidden from
+  // everyone else in redaction). null = public.
+  state.log.push({ t: Date.now(), text, kind, to });
   if (state.log.length > 200) state.log.shift();
+}
+
+// Effects channel: a rolling buffer of discrete events the client uses to
+// trigger sounds, the Big Boy overlay, and animations. Each has a unique id;
+// clients play any id they haven't seen yet.
+function emitFx(state, type, extra = {}) {
+  state.fxSeq = (state.fxSeq || 0) + 1;
+  state.fx.push({ id: state.fxSeq, type, ...extra });
+  if (state.fx.length > 16) state.fx.shift();
+}
+
+// "Bouta goose" is public and strategic, but auto-revokes if the player's
+// score falls back below the announce threshold (e.g. Big Boy wiped them).
+function syncAnnounce(state, player) {
+  if (player.announcedBoutaGoose && score(player) < ANNOUNCE_AT) {
+    player.announcedBoutaGoose = false;
+    logMsg(state, `${player.name} dropped below ${ANNOUNCE_AT} — "bouta goose" is off. Re-deck and call it again next time.`, 'bad');
+  }
 }
 
 // --- Helpers -------------------------------------------------------------
@@ -111,6 +133,7 @@ function discardRegularHand(state, player, reason) {
   const n = player.regular.length;
   player.regular = [];
   logMsg(state, `${player.name} lost ${n} regular goose card(s) — ${reason}.`, 'bad');
+  syncAnnounce(state, player);
 }
 
 function takeWildFromHand(player, kind) {
@@ -133,19 +156,22 @@ function endTurn(state) {
   state.turnIndex = nextSeat(state);
   state.phase = 'PRE_DRAW';
   logMsg(state, `It's ${activePlayer(state).name}'s turn.`);
+  emitFx(state, 'TURN', { actor: activePlayer(state).name });
 }
 
 function checkWin(state, player) {
   if (score(player) < WIN_SCORE) return false;
   if (state.options.boutaGooseRule && !player.announcedBoutaGoose) {
-    // Got caught with 21 without calling it — geese scatter.
-    discardRegularHand(state, player, `reached ${WIN_SCORE} but never hollered "I'm bouta goose!"`);
-    logMsg(state, `${player.name} got GOOSED for not announcing! No crown this time.`, 'bad');
+    // Got caught with 21 without calling it — the whole gaggle scatters.
+    discardRegularHand(state, player, `reached ${WIN_SCORE} but never announced "I'm bouta goose!"`);
+    logMsg(state, `${player.name} got GOOSED for not announcing — lost their whole regular hand! No crown this time.`, 'bad');
+    emitFx(state, 'PENALTY', { actor: player.name });
     return false;
   }
   state.winnerId = player.id;
   state.phase = 'GAME_OVER';
-  logMsg(state, `🏆 ${player.name} reached ${score(player)} and is crowned THE GREAT HONKEROR!`, 'win');
+  logMsg(state, `${player.name} reached ${score(player)} and is crowned THE GREAT HONKEROR!`, 'win');
+  emitFx(state, 'WIN', { actor: player.name });
   return true;
 }
 
@@ -181,7 +207,8 @@ function announce(state) {
   if (score(p) < ANNOUNCE_AT) return err(state, `Premature! Announce at ${ANNOUNCE_AT}+ (lol learn to count).`);
   if (p.announcedBoutaGoose) return err(state, 'Already announced.');
   p.announcedBoutaGoose = true;
-  logMsg(state, `${p.name}: "I'M BOUTA GOOSE!"`, 'good');
+  logMsg(state, `${p.name} announced: "I'M BOUTA GOOSE!"`, 'good');
+  emitFx(state, 'ANNOUNCE', { actor: p.name });
   return { state };
 }
 
@@ -205,6 +232,8 @@ function trade(state, action) {
   const wild = state.wildDraw.pop();
   p.wild.push(wild);
   logMsg(state, `${p.name} traded ${TRADE_COST} points in the Wild Goose Market for a Wild card.`, 'good');
+  emitFx(state, 'TRADE', { actor: p.name });
+  syncAnnounce(state, p);
   return { state, drewWild: wild.kind };
 }
 
@@ -215,7 +244,8 @@ function lawnMower(state, action) {
   const target = findPlayer(state, action.targetId);
   if (!target) return err(state, 'Pick a valid target.');
   state.wildDiscard.push(card);
-  logMsg(state, `${p.name} fired up the LAWN MOWER at ${target.name}! BRRRRRRR!`, 'bad');
+  logMsg(state, `${p.name} fired up the LAWN MOWER at ${target.name}! Unblockable!`, 'bad');
+  emitFx(state, 'LAWN_MOWER', { actor: p.name, target: target.name });
   discardRegularHand(state, target, 'mowed down (unblockable)');
   return { state };
 }
@@ -229,12 +259,16 @@ function draw(state) {
     state.bigBoyCard = card;
     state.pending = { type: 'BIG_BOY', target: p.id, origin: p.id };
     state.phase = 'AWAIT_BIG_BOY';
-    logMsg(state, `${p.name} drew BIG BOY! Everybody: "QUIT GOOSIN AROUND, YA GOOSE!"`, 'bad');
+    // Public — the one draw everyone is allowed to see.
+    logMsg(state, `${p.name} drew BIG BOY! Everybody: "QUIT GOOSIN' AROUND, YA GOOSE!"`, 'bad');
+    emitFx(state, 'BIG_BOY', { actor: p.name });
     return { state, bigBoy: true };
   }
 
   p.regular.push(card);
-  logMsg(state, `${p.name} drew a ${CARD_META[card.kind].name}.`);
+  // Private — opponents never learn what you drew.
+  logMsg(state, `You drew a ${CARD_META[card.kind].name}.`, 'info', p.id);
+  emitFx(state, 'DRAW', { actor: p.name });
   if (checkWin(state, p)) return { state };
   endTurn(state);
   return { state };
@@ -249,7 +283,8 @@ function respond(state, action) {
     const card = takeWildFromHand(target, 'GOOSE_GANG');
     if (!card) return err(state, "You don't have a Goose Gang.");
     state.wildDiscard.push(card);
-    logMsg(state, `${target.name} threw down the GOOSE GANG — blocked! HONK HONK SON!`, 'good');
+    logMsg(state, `${target.name} threw down the GOOSE GANG — blocked! Honk honk, son!`, 'good');
+    emitFx(state, 'GOOSE_GANG', { actor: target.name });
     finishThreat(state);
     return { state };
   }
@@ -268,12 +303,15 @@ function respond(state, action) {
     state.pending = { type: 'GET_GOOSED', target: next.id, origin: pending.origin };
     state.phase = 'AWAIT_GET_GOOSED';
     logMsg(state, `${target.name} yelled "GET GOOSED!" and sent Big Boy at ${next.name}!`, 'bad');
+    emitFx(state, 'GET_GOOSED', { actor: target.name, target: next.name });
     return { state };
   }
 
   if (resp === 'absorb') {
+    const had = target.regular.length;
     discardRegularHand(state, target, 'Big Boy scared the geese off');
-    if (target.regular.length === 0) logMsg(state, `${target.name} took the hit from Big Boy.`, 'bad');
+    if (had === 0) logMsg(state, `${target.name} took the hit from Big Boy (no geese to lose).`, 'bad');
+    emitFx(state, 'ABSORB', { actor: target.name });
     finishThreat(state);
     return { state };
   }
@@ -309,7 +347,9 @@ export function redact(state, viewerId) {
     wildDrawCount: state.wildDraw.length,
     wildDiscardCount: state.wildDiscard.length,
     options: state.options,
-    log: state.log.slice(-30),
+    // Private entries (a player's own draws) are hidden from everyone else.
+    log: state.log.filter((e) => !e.to || e.to === viewerId).slice(-40),
+    fx: state.fx.slice(-8),
     players: state.players.map((p) => {
       const isMe = p.id === viewerId;
       return {
