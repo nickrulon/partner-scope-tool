@@ -1,27 +1,29 @@
-// Client for Quit Goosin Around!
-// Talks to server.js over WebSocket. Renders authoritative state; never
-// computes rules locally. Art is loaded from cards/<KIND>.png with a graceful
-// text fallback so the game is fully playable before any art exists.
+// Client for Quit Goosin' Around! — Linocut Pond Party UI.
+// Renders authoritative server state; never computes rules locally.
+// Card art loads from cards/<KIND>.png; sounds from sounds/<event>.<ext>.
+
+import {
+  initAudio, playSound, fxSound, setMuted, isMuted, setVolume, getVolume,
+} from './audio.js';
 
 const $ = (id) => document.getElementById(id);
 const PID_KEY = 'goose_pid';
 let playerId = localStorage.getItem(PID_KEY) || `p${Math.random().toString(36).slice(2, 9)}`;
 localStorage.setItem(PID_KEY, playerId);
 
-let ws, cardMeta = {}, room = null, view = null;
+let ws, cardMeta = {}, view = null;
 let tradeMode = false, tradeSel = new Set();
-let targetMode = null; // { action, response? } awaiting an opponent click
+let targetMode = null;            // lawn-mower targeting (click a player)
+let goosedChoosing = false;       // get-goosed target picker inside overlay
+let lastFxId = 0, fxPrimed = false;
+let laneTimer = null;
 
-// Card-back art for the draw piles. Drop these PNGs in public/cards/ and the
-// piles render as a stack of the backs; until then they show a plain pile.
 const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' };
 
-// --- art existence cache: try each image once, resolving the real extension
-// so GOOSE.png / GOOSE.PNG / GOOSE.jpg all "just work" cross-platform. ---
-const artStatus = {}; // kind -> 'ok' | 'missing' | 'pending'
-const artUrl = {};    // kind -> resolved url once found
+// ---- art probing (resolves real extension; sizes as cover) ----
+const artStatus = {}, artUrl = {};
 const ART_EXTS = ['png', 'PNG', 'jpg', 'jpeg', 'JPG', 'webp'];
-const ART_BUST = Date.now(); // unique per page load → never reuse a stale image
+const ART_BUST = Date.now();
 function probeArt(kind) {
   if (artStatus[kind]) return;
   artStatus[kind] = 'pending';
@@ -36,43 +38,51 @@ function probeArt(kind) {
   };
   tryNext();
 }
+const hasArt = (k) => artStatus[k] === 'ok';
 
-// --- connection ----------------------------------------------------------
-
+// ---- connection ----
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.onmessage = (ev) => {
     const { type, payload } = JSON.parse(ev.data);
     if (type === 'cardMeta') { cardMeta = payload; Object.keys(cardMeta).forEach(probeArt); Object.values(PILE_BACKS).forEach(probeArt); }
-    else if (type === 'joined') { room = { code: payload.code, hostId: payload.hostId }; }
+    else if (type === 'joined') { view = view || {}; view.hostId = payload.hostId; }
     else if (type === 'state') { view = payload; render(); }
     else if (type === 'error') { toast(payload.message); $('lobbyErr').textContent = payload.message; }
-    else if (type === 'chat') { addChat(payload.from, payload.text); }
+    else if (type === 'chat') { addChat(payload.from, payload.text); if (payload.from) playSound('honk'); }
   };
   ws.onclose = () => { toast('Disconnected — reconnecting…'); setTimeout(connect, 1500); };
 }
 function sendWs(type, payload = {}) { ws.readyState === 1 && ws.send(JSON.stringify({ type, payload })); }
 
-// --- lobby ---------------------------------------------------------------
-
-$('createBtn').onclick = () => sendWs('create', { name: $('nameInput').value || 'Goose', playerId });
-$('joinBtn').onclick = () => sendWs('join', { code: $('codeInput').value, name: $('nameInput').value || 'Goose', playerId });
+// ---- lobby wiring ----
+$('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $('nameInput').value || 'Goose', playerId }); };
+$('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value || 'Goose', playerId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
-$('startBtn').onclick = () => sendWs('start', { boutaGooseRule: $('boutaRule').checked });
+$('startBtn').onclick = () => { playSound('click'); sendWs('start', { boutaGooseRule: $('boutaRule').checked }); };
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() { const t = $('chatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('chatInput').value = ''; } }
 
-// --- top-level render ----------------------------------------------------
-
-function showScreen(id) {
-  ['lobby', 'waiting', 'game'].forEach((s) => $(s).classList.toggle('hidden', s !== id));
+// ---- sound controls ----
+function syncSoundUI() {
+  $('soundToggle').textContent = isMuted() ? 'SOUND: OFF' : 'SOUND: ON';
+  $('muteToggle').checked = isMuted();
+  $('volSlider').value = Math.round(getVolume() * 100);
 }
+$('soundToggle').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isMuted()) playSound('click'); };
+$('muteToggle').onchange = (e) => { setMuted(e.target.checked); syncSoundUI(); };
+$('volSlider').oninput = (e) => { setVolume(e.target.value / 100); };
+$('volSlider').onchange = () => playSound('click');
+
+// ---- top-level render ----
+function showScreen(id) { ['lobby', 'waiting', 'game'].forEach((s) => $(s).classList.toggle('hidden', s !== id)); }
 function rerender() { if (view) render(); }
 
 function render() {
   if (!view) return;
+  if (!view.code) { showScreen('lobby'); return; }
   if (!view.game) { renderWaiting(); showScreen('waiting'); return; }
   renderGame();
   showScreen('game');
@@ -95,67 +105,77 @@ function renderWaiting() {
     : 'Waiting for the host to start…';
 }
 
-// --- game render ---------------------------------------------------------
+const me = () => view.game.players.find((p) => p.id === playerId);
+const isMyTurn = () => view.game.turnPlayerId === playerId;
 
-function me() { return view.game.players.find((p) => p.id === playerId); }
-function isMyTurn() { return view.game.turnPlayerId === playerId; }
+function renderGame() {
+  const g = view.game;
+  $('gRoomName').textContent = view.code;
+  $('gPlayerCount').textContent = `${g.players.length} geese`;
+
+  applyPile('gooseDraw', g.gooseDrawCount, PILE_BACKS.gooseDraw);
+  applyPile('wildDraw', g.wildDrawCount, PILE_BACKS.wildDraw);
+  $('gooseDiscard').querySelector('.pile-n').textContent = g.gooseDiscardCount;
+
+  renderTurnBanner();
+  renderPlayers();
+  renderMine();
+  renderControls();
+  renderLog();
+  renderOverlay();
+  handleFx();
+  syncSoundUI();
+}
+
+function renderTurnBanner() {
+  const g = view.game;
+  const banner = $('turnBanner'), sub = $('turnSub');
+  if (g.phase === 'GAME_OVER') {
+    const w = g.players.find((p) => p.id === g.winnerId);
+    banner.textContent = w ? `${w.name} wins!` : 'Game over';
+    banner.className = 'turn-banner mine';
+    sub.textContent = w && w.id === playerId ? 'you are the great honkeror' : 'flap yer wings and honk';
+    return;
+  }
+  const turnP = g.players.find((p) => p.id === g.turnPlayerId);
+  if (isMyTurn()) { banner.textContent = 'Your Turn'; banner.className = 'turn-banner mine'; sub.textContent = 'get yer geese'; }
+  else { banner.textContent = `${turnP?.name || ''}'s turn`; banner.className = 'turn-banner'; sub.textContent = 'quit goosin’ around'; }
+}
 
 function applyPile(elId, count, backKind) {
   const el = $(elId);
   el.querySelector('.pile-n').textContent = count;
-  const ok = artStatus[backKind] === 'ok' && count > 0;
+  const ok = hasArt(backKind) && count > 0;
   el.classList.toggle('has-back', ok);
   el.classList.toggle('empty', count === 0);
-  // Set sizing inline so the .pile.wild gradient rule can't reset it to auto.
   el.style.backgroundImage = ok ? `url(${artUrl[backKind]})` : '';
   el.style.backgroundSize = ok ? 'cover' : '';
   el.style.backgroundPosition = ok ? 'center' : '';
 }
 
-function renderGame() {
+function renderPlayers() {
   const g = view.game;
-  // piles — draw piles show your card-back art as a stack
-  applyPile('gooseDraw', g.gooseDrawCount, PILE_BACKS.gooseDraw);
-  applyPile('wildDraw', g.wildDrawCount, PILE_BACKS.wildDraw);
-  $('gooseDiscard').querySelector('.pile-n').textContent = g.gooseDiscardCount;
-
-  // turn banner
-  const turnP = g.players.find((p) => p.id === g.turnPlayerId);
-  const banner = $('turnBanner');
-  if (g.phase === 'GAME_OVER') {
-    const w = g.players.find((p) => p.id === g.winnerId);
-    banner.innerHTML = `🏆 ${esc(w?.name || '?')} is THE GREAT HONKEROR! Everybody flap and honk.`;
-    banner.className = 'turn-banner mine';
-  } else {
-    banner.textContent = isMyTurn() ? '🪿 YOUR TURN — get yer geese!' : `${turnP?.name || ''}'s turn`;
-    banner.className = 'turn-banner' + (isMyTurn() ? ' mine' : '');
-  }
-
-  renderOpponents();
-  renderMine();
-  renderControls();
-  renderPrompt();
-  renderLog();
-}
-
-function renderOpponents() {
-  const g = view.game;
-  const box = $('opponents'); box.innerHTML = '';
-  for (const p of g.players) {
-    if (p.id === playerId) continue;
+  const box = $('players'); box.innerHTML = '';
+  // viewer first, then others in seat order
+  const ordered = [me(), ...g.players.filter((p) => p.id !== playerId)];
+  for (const p of ordered) {
     const el = document.createElement('div');
-    el.className = 'opp';
+    el.className = 'player paper';
     if (p.id === g.turnPlayerId) el.classList.add('active');
     if (g.pending && g.pending.targetId === p.id) el.classList.add('target');
     if (!p.connected) el.classList.add('off');
+    const goose = hasArt('GOOSE') ? `background-image:url(${artUrl.GOOSE})` : '';
     el.innerHTML =
-      `<div class="nm">${esc(p.name)}${p.announcedBoutaGoose ? ' 📣' : ''}</div>` +
-      `<div class="sc">${p.score} <span style="font-size:.7rem;opacity:.7">/ 21</span></div>` +
-      `<div class="meta">${p.regularCount} geese · ${p.wildCount} wild${p.connected ? '' : ' · away'}</div>`;
-    if (targetMode) {
+      `<div class="pinfo">
+        <div class="pname">${esc(p.name)}${p.id === playerId ? ' <span class="you">(you)</span>' : ''}</div>
+        <div class="pscore">${p.score}<span class="max"> / 21</span></div>
+        <div class="pmeta">${p.regularCount} geese · ${p.wildCount} wild${p.connected ? '' : ' · away'}</div>
+        ${p.announcedBoutaGoose ? '<div class="pmeta"><span class="stamp goose">bouta goose</span></div>' : ''}
+      </div>
+      <div class="pgoose" style="${goose}"></div>`;
+    if (targetMode && p.id !== playerId) {
       el.classList.add('selectable');
-      el.style.cursor = 'pointer';
-      el.onclick = () => chooseTarget(p.id);
+      el.onclick = () => chooseLawnTarget(p.id);
     }
     box.appendChild(el);
   }
@@ -163,140 +183,166 @@ function renderOpponents() {
 
 function renderMine() {
   const p = me();
-  $('myName').textContent = p.name + (isMyTurn() ? ' — your turn' : '');
-  $('myScore').textContent = `${p.score} / 21`;
-  $('myAnnounce').classList.toggle('hidden', !p.announcedBoutaGoose);
-
   const wild = $('myWild'); wild.innerHTML = '';
   (p.wild || []).forEach((c) => wild.appendChild(cardEl(c, false)));
-
   const reg = $('myRegular'); reg.innerHTML = '';
   (p.regular || []).forEach((c) => {
-    const selectable = tradeMode;
-    const el = cardEl(c, selectable);
+    const el = cardEl(c, tradeMode);
     if (tradeMode) {
       if (tradeSel.has(c.id)) el.classList.add('selected');
       el.onclick = () => { tradeSel.has(c.id) ? tradeSel.delete(c.id) : tradeSel.add(c.id); renderMine(); renderControls(); };
     }
     reg.appendChild(el);
   });
+  const total = (p.regular || []).reduce((s, c) => s + (cardMeta[c.kind]?.points || 0), 0);
+  $('handHint').textContent = `${p.regular ? p.regular.length : 0} geese · ${total} pts in geese`;
 }
 
 function cardEl(card, selectable) {
-  const meta = cardMeta[card.kind] || { name: card.kind, points: 0, color: '#444' };
+  const meta = cardMeta[card.kind] || { name: card.kind, points: 0, color: '#caa' };
   const el = document.createElement('div');
   el.className = 'card' + (selectable ? ' selectable' : '');
-  // Use backgroundColor (not the `background` shorthand) so we don't clobber
-  // the CSS `background-size: cover`; set sizing inline to be bulletproof.
   el.style.backgroundColor = meta.color;
-  if (artStatus[card.kind] === 'ok') {
+  if (hasArt(card.kind)) {
     el.style.backgroundImage = `url(${artUrl[card.kind]})`;
     el.style.backgroundSize = 'cover';
     el.style.backgroundPosition = 'center';
   }
-  const showText = artStatus[card.kind] !== 'ok';
+  const showText = !hasArt(card.kind);
   el.innerHTML =
     `<div class="pts">${meta.points}</div>` +
-    (showText ? `<div class="art-fallback">${emojiFor(card.kind)}</div>` : '') +
-    (showText ? `<div class="label">${esc(meta.name)}</div>` : '');
+    (showText ? `<div class="label">${esc(meta.name)}</div>` : '<div class="nameless"></div>');
   el.title = `${meta.name} — ${meta.desc || ''}`;
   return el;
 }
 
-function emojiFor(kind) {
-  return { GOOSE: '🦢', GEESE: '🦢🦢', GEESES: '🪿', BIG_BOY: '👦', UNGOOSABLE: '🛡️',
-    GOOSE_GANG: '🪿🪿', GET_GOOSED: '↪️', LAWN_MOWER: '🚜', GREAT_HONKEROR: '👑' }[kind] || '🪿';
-}
-
-// --- controls (PRE_DRAW actions) -----------------------------------------
-
+// ---- controls (PRE_DRAW) ----
 function renderControls() {
   const g = view.game, p = me();
   const c = $('controls'); c.innerHTML = '';
   if (g.phase === 'GAME_OVER') {
-    if (playerId === view.hostId) c.appendChild(btn('Rematch (winner keeps the crown)', 'primary', () => sendWs('rematch')));
-    else c.appendChild(note('Waiting for host to start a rematch…'));
+    if (playerId === view.hostId) c.appendChild(btn('Rematch', 'btn-primary', () => sendWs('rematch')));
+    else c.appendChild(hint('Waiting for host to start a rematch…'));
     return;
   }
   if (g.phase !== 'PRE_DRAW' || !isMyTurn()) {
-    c.appendChild(note(g.phase === 'PRE_DRAW' ? 'Waiting for your turn…' : 'Resolving the threat…'));
+    c.appendChild(hint(g.phase === 'PRE_DRAW' ? 'Waiting for your turn…' : 'Resolving Big Boy…'));
     return;
   }
 
   if (tradeMode) {
     const total = [...tradeSel].reduce((s, id) => s + (cardMeta[p.regular.find((x) => x.id === id)?.kind]?.points || 0), 0);
-    c.appendChild(note(`Wild Goose Market: select geese totaling exactly 4 points (selected: ${total}).`));
-    const confirm = btn('Trade for a Wild', 'primary', doTrade);
+    const help = document.createElement('div'); help.className = 'trade-help';
+    help.textContent = `Pick geese worth exactly 4 points (selected: ${total}).`;
+    c.appendChild(help);
+    const confirm = btn('Trade for a Wild', 'btn-primary', doTrade);
     confirm.disabled = total !== 4 || g.wildDrawCount === 0;
     c.appendChild(confirm);
-    c.appendChild(btn('Cancel', '', () => { tradeMode = false; tradeSel.clear(); renderMine(); renderControls(); }));
+    c.appendChild(btn('Cancel', 'btn-ghost', () => { tradeMode = false; tradeSel.clear(); renderMine(); renderControls(); }));
     return;
   }
 
-  // Announce
-  if (p.score >= 17 && !p.announcedBoutaGoose) c.appendChild(btn('📣 I\'m bouta goose!', 'primary', () => sendWs('action', { action: { type: 'ANNOUNCE_GOOSE' } })));
-  // Trade
-  const tradeBtn = btn('🛒 Trade in Wild Goose Market', '', () => { tradeMode = true; tradeSel.clear(); renderMine(); renderControls(); });
+  if (p.score >= 17 && !p.announcedBoutaGoose) {
+    c.appendChild(btn('Announce: I’m bouta goose!', 'btn-primary', () => sendWs('action', { action: { type: 'ANNOUNCE_GOOSE' } })));
+  }
+  const tradeBtn = btn('Trade in Wild Goose Market', '', () => { tradeMode = true; tradeSel.clear(); renderMine(); renderControls(); });
   tradeBtn.disabled = g.wildDrawCount === 0 || p.regular.length === 0;
   c.appendChild(tradeBtn);
-  // Lawn Mower
   if ((p.wild || []).some((w) => w.kind === 'LAWN_MOWER')) {
-    c.appendChild(btn('🚜 Play Lawn Mower', '', () => beginTarget({ type: 'PLAY_LAWN_MOWER' })));
+    c.appendChild(btn('Play Lawn Mower', '', () => beginLawnTarget()));
   }
-  // Draw — ends turn
-  c.appendChild(btn('Draw a Goose Card ▶ (ends turn)', 'primary', () => sendWs('action', { action: { type: 'DRAW' } })));
+  c.appendChild(btn('Draw a Goose Card  (ends turn)', 'btn-primary', () => sendWs('action', { action: { type: 'DRAW' } })));
 }
+function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tradeSel] } }); tradeMode = false; tradeSel.clear(); }
 
-function doTrade() {
-  sendWs('action', { action: { type: 'TRADE', cardIds: [...tradeSel] } });
-  tradeMode = false; tradeSel.clear();
-}
+// ---- lawn-mower targeting (click a player panel) ----
+function beginLawnTarget() { targetMode = true; toast('Pick a target — click a player.'); renderPlayers(); }
+function chooseLawnTarget(targetId) { targetMode = false; sendWs('action', { action: { type: 'PLAY_LAWN_MOWER', targetId } }); renderPlayers(); }
 
-// --- response prompt (Big Boy / Get Goosed) ------------------------------
-
-function renderPrompt() {
+// ---- Big Boy / Get Goosed overlay ----
+function renderOverlay() {
   const g = view.game;
-  const box = $('prompt');
+  const ov = $('overlay');
+  const active = g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED';
+  ov.classList.toggle('hidden', !active);
+  if (!active) { goosedChoosing = false; return; }
+
+  const art = $('overlayArt');
+  art.style.backgroundImage = hasArt('BIG_BOY') ? `url(${artUrl.BIG_BOY})` : '';
+  art.style.backgroundColor = hasArt('BIG_BOY') ? '' : (cardMeta.BIG_BOY?.color || '#7a2e2e');
+  if (!hasArt('BIG_BOY')) art.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;font-family:var(--display);color:var(--cream);font-size:2rem">BIG BOY</div>';
+  else art.innerHTML = '';
+
   const amTarget = g.pending && g.pending.targetId === playerId;
-  if (!amTarget) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-  const p = me();
-  const hasGang = (p.wild || []).some((w) => w.kind === 'GOOSE_GANG');
-  const hasGoosed = (p.wild || []).some((w) => w.kind === 'GET_GOOSED');
-  const isBigBoyDrawer = g.pending.type === 'BIG_BOY'; // only drawer can get_goosed from BIG_BOY
+  const targetName = g.players.find((p) => p.id === g.pending.targetId)?.name || '';
+  const cc = $('overlayControls'); cc.innerHTML = '';
 
-  box.classList.remove('hidden');
-  box.innerHTML = g.pending.type === 'BIG_BOY'
-    ? `<h3>BIG BOY came for YOUR geese! 😱 "QUIT GOOSIN AROUND, YA GOOSE!"</h3>`
-    : `<h3>Someone yelled GET GOOSED at you! Big Boy's comin'. 😱</h3>`;
-  const row = document.createElement('div'); row.className = 'row';
+  if (!amTarget) { cc.appendChild(msg(`Big Boy is after ${esc(targetName)}…`)); return; }
 
-  row.appendChild(btn('😩 Take it (discard my geese)', '', () => respond('absorb')));
-  if (hasGang) row.appendChild(btn('🪿 Play Goose Gang (block)', 'primary', () => respond('goose_gang')));
-  // Get Goosed: from BIG_BOY only by the drawer; from GET_GOOSED the target can re-divert.
-  if (hasGoosed) row.appendChild(btn('↪️ Play Get Goosed (divert)', '', () => beginTarget({ type: 'RESPOND', response: 'get_goosed' })));
-  box.appendChild(row);
+  if (goosedChoosing) {
+    cc.appendChild(msg('Send Big Boy at…'));
+    for (const o of g.players) {
+      if (o.id === playerId) continue;
+      cc.appendChild(btn(o.name, '', () => { goosedChoosing = false; respond('get_goosed', o.id); }));
+    }
+    cc.appendChild(btn('Back', 'btn-ghost', () => { goosedChoosing = false; renderOverlay(); }));
+    return;
+  }
+
+  const hasGang = (me().wild || []).some((w) => w.kind === 'GOOSE_GANG');
+  const hasGoosed = (me().wild || []).some((w) => w.kind === 'GET_GOOSED');
+  cc.appendChild(btn('Take it (discard my geese)', '', () => respond('absorb')));
+  if (hasGang) cc.appendChild(btn('Play Goose Gang (block)', 'btn-primary', () => respond('goose_gang')));
+  if (hasGoosed) cc.appendChild(btn('Play Get Goosed (divert)', '', () => { goosedChoosing = true; renderOverlay(); }));
+}
+function respond(response, targetId) { sendWs('action', { action: { type: 'RESPOND', response, targetId } }); }
+
+// ---- effects (sound + lane flash + overlay slam) ----
+function handleFx() {
+  const fx = view.game.fx || [];
+  if (!fxPrimed) { lastFxId = fx.reduce((m, f) => Math.max(m, f.id), 0); fxPrimed = true; return; }
+  const fresh = fx.filter((f) => f.id > lastFxId);
+  if (!fresh.length) return;
+  lastFxId = fx.reduce((m, f) => Math.max(m, f.id), lastFxId);
+  for (const f of fresh) {
+    if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
+    else playSound(fxSound(f.type));
+    if (f.type === 'BIG_BOY') slamOverlay();
+    else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) flashEvent(f);
+  }
 }
 
-function respond(response, targetId) {
-  sendWs('action', { action: { type: 'RESPOND', response, targetId } });
+function slamOverlay() {
+  const card = document.querySelector('.overlay-card');
+  if (!card) return;
+  card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
 }
 
-// --- targeting -----------------------------------------------------------
-
-function beginTarget(action) {
-  targetMode = action;
-  toast('Pick a target — click an opponent.');
-  renderOpponents();
+const EVENT_FLASH = {
+  LAWN_MOWER: { kind: 'LAWN_MOWER', title: 'LAWN MOWER!', sub: (f) => `${f.actor} mowed ${f.target}` },
+  GET_GOOSED: { kind: 'GET_GOOSED', title: 'GET GOOSED!', sub: (f) => `${f.actor} → ${f.target}` },
+  GOOSE_GANG: { kind: 'GOOSE_GANG', title: 'GOOSE GANG!', sub: (f) => `${f.actor} blocked it` },
+  ANNOUNCE:   { kind: null, title: 'BOUTA GOOSE!', sub: (f) => `${f.actor} is closing in` },
+  TRADE:      { kind: null, title: 'WILD MARKET', sub: (f) => `${f.actor} traded for a Wild` },
+  PENALTY:    { kind: null, title: 'GOOSED!', sub: (f) => `${f.actor} forgot to announce` },
+};
+function flashEvent(f) {
+  const cfg = EVENT_FLASH[f.type]; if (!cfg) return;
+  const lane = $('eventLane');
+  const artCss = cfg.kind && hasArt(cfg.kind) ? `background-image:url(${artUrl[cfg.kind]})` : '';
+  lane.innerHTML = `<div class="event-flash">
+      ${cfg.kind ? `<div class="ef-card" style="${artCss}"></div>` : ''}
+      <div class="ef-title">${esc(cfg.title)}</div>
+      <div class="ef-sub">${esc(cfg.sub(f))}</div>
+    </div>`;
+  clearTimeout(laneTimer);
+  laneTimer = setTimeout(resetLane, 2400);
 }
-function chooseTarget(targetId) {
-  const action = targetMode; targetMode = null;
-  if (action.type === 'PLAY_LAWN_MOWER') sendWs('action', { action: { type: 'PLAY_LAWN_MOWER', targetId } });
-  else if (action.type === 'RESPOND') respond('get_goosed', targetId);
-  renderOpponents();
+function resetLane() {
+  $('eventLane').innerHTML = '<div class="event-idle"><span class="event-idle-title">★ Event Lane ★</span><span class="event-idle-sub">Game-wide moments show up here</span></div>';
 }
 
-// --- log / chat ----------------------------------------------------------
-
+// ---- log / chat ----
 function renderLog() {
   const box = $('log'); box.innerHTML = '';
   for (const e of view.game.log) {
@@ -314,15 +360,21 @@ function addChat(from, text) {
   box.appendChild(d); box.scrollTop = box.scrollHeight;
 }
 
-// --- utils ---------------------------------------------------------------
-
-function btn(label, cls, fn) { const b = document.createElement('button'); b.className = cls; b.textContent = label; b.onclick = fn; return b; }
-function note(text) { const s = document.createElement('span'); s.className = 'tag'; s.textContent = text; return s; }
+// ---- utils ----
+function btn(label, cls, fn) {
+  const b = document.createElement('button');
+  b.className = 'btn ' + (cls || '');
+  b.textContent = label;
+  b.onclick = () => { playSound('click'); fn(); };
+  return b;
+}
+function hint(text) { const s = document.createElement('div'); s.className = 'hintline'; s.textContent = text; return s; }
+function msg(html) { const s = document.createElement('div'); s.className = 'overlay-msg'; s.innerHTML = html; return s; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 let toastTimer;
-function toast(msg) {
-  const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 3000);
-}
+function toast(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 3000); }
 
+initAudio();
+syncSoundUI();
+resetLane();
 connect();
