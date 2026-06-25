@@ -260,7 +260,10 @@ function trade(state, action) {
   const wild = state.wildDraw.pop();
   p.wild.push(wild);
   logMsg(state, `${p.name} traded ${TRADE_COST} points in the Wild Goose Market for a Wild card.`, 'good');
+  // Public: announce a trade happened (no card leak). Private: reveal the
+  // actual Wild to the trader so it gets the same big center reveal as a draw.
   emitFx(state, 'TRADE', { actor: p.name });
+  emitFx(state, 'TRADE_REVEAL', { actor: p.name, kind: wild.kind, cardId: wild.id, to: p.id });
   syncAnnounce(state, p);
   return { state, drewWild: wild.kind };
 }

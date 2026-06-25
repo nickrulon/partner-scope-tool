@@ -186,6 +186,20 @@ console.log('\n== Big Boy draw IS public + emits an fx event ==');
   ok(fx, 'a BIG_BOY fx event was emitted');
 }
 
+console.log('\n== Trade emits a private Wild reveal to the trader only ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 24 });
+  g.players[0].regular = [{ id: 'x', kind: 'GEESES' }]; // 4 pts
+  g.wildDraw.push({ id: 'w1', kind: 'UNGOOSABLE' });    // top of the wild pile
+  applyAction(g, 'A', { type: 'TRADE', cardIds: ['x'] });
+  const aRev = redact(g, 'A').fx.find((f) => f.type === 'TRADE_REVEAL');
+  const bRev = redact(g, 'B').fx.find((f) => f.type === 'TRADE_REVEAL');
+  const bPub = redact(g, 'B').fx.find((f) => f.type === 'TRADE');
+  ok(aRev && aRev.kind === 'UNGOOSABLE', 'A gets a private TRADE_REVEAL tagged with the Wild kind');
+  ok(!bRev, 'B never receives the Wild reveal (no leak)');
+  ok(bPub, 'B still sees the public TRADE announcement');
+}
+
 console.log('\n== Naming geese: caps by point value, only goose cards ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 21 });

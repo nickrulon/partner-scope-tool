@@ -464,6 +464,9 @@ function handleFx() {
   const drawsThisBatch = fresh.some((f) => f.type === 'DRAW' || (f.type === 'DRAW_HIDDEN' && f.actorId !== playerId));
   const turnFx = fresh.find((f) => f.type === 'TURN');
   const afterDraw = () => { if (turnFx) playTurn(turnFx); };
+  // My own trade gets a private reveal of the Wild — so skip the public
+  // "WILD MARKET" flash for me (the reveal stands in for it).
+  const myTradeReveal = fresh.some((f) => f.type === 'TRADE_REVEAL');
 
   for (const f of fresh) {
     if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
@@ -477,10 +480,17 @@ function handleFx() {
     else if (f.type === 'DRAW_HIDDEN') {
       if (f.actorId !== playerId) flyDraw({ faceKind: null, toEl: playerPanel(f.actorId), onSettled: afterDraw });
     }
+    // Your Wild Market pull: same big 3s reveal as a draw, flying from the
+    // Wild Market into your wild hand (private — only you see which Wild).
+    else if (f.type === 'TRADE_REVEAL') {
+      flyDraw({ faceKind: f.kind, cardId: f.cardId, reveal: true, fromEl: $('wildDraw'), toEl: $('myWild') });
+    }
     else if (f.type === 'TURN') { if (!drawsThisBatch) playTurn(f); }
     else playSound(fxSound(f.type));
     if (f.type === 'BIG_BOY') slamOverlay();
-    else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) flashEvent(f);
+    else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) {
+      if (!(f.type === 'TRADE' && myTradeReveal)) flashEvent(f);
+    }
   }
 }
 
@@ -511,8 +521,8 @@ function playerPanel(id) { return document.querySelector(`.player[data-pid="${id
 // Animate a card from the goose deck, big through the center, to a destination.
 // `reveal` (your own draw) holds it large for ~3s with a caption + naming, then
 // sails it to your gaggle. Facedown opponent draws get a quick fly-by.
-function flyDraw({ faceKind, cardId, reveal, toEl, onSettled }) {
-  const deck = $('gooseDraw'), play = $('playArea'), layer = $('flyLayer');
+function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
+  const deck = fromEl || $('gooseDraw'), play = $('playArea'), layer = $('flyLayer');
   if (!deck || !play || !layer) { onSettled && onSettled(); return; }
   const fr = deck.getBoundingClientRect(), pr = play.getBoundingClientRect();
   const w = fr.width, h = fr.height;
@@ -537,7 +547,8 @@ function flyDraw({ faceKind, cardId, reveal, toEl, onSettled }) {
     if (caption) caption.remove();
     card.remove();
     if (reveal) laneBusy = false;
-    onSettled && onSettled();
+    if (onSettled) onSettled();
+    else renderPlayArea(); // no turn follows (e.g. a trade) — restore the center
   };
   const flyOut = () => {
     if (caption) { caption.remove(); caption = null; }
