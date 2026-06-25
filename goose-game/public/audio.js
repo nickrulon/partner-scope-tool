@@ -45,6 +45,36 @@ export function playSound(name) {
   } catch { /* ignore */ }
 }
 
+// Sequential queue — used only for the draw→turn chain so click, draw, and
+// turn-pass sounds play one after another instead of all at once.
+let queue = [];
+let pumping = false;
+export function enqueueSound(name) {
+  if (muted || !name) return;
+  queue.push(name);
+  if (!pumping) pump();
+}
+function pump() {
+  if (!queue.length) { pumping = false; return; }
+  pumping = true;
+  const name = queue.shift();
+  const url = resolved[name];
+  if (!url) { probe(name); setTimeout(pump, 60); return; } // missing → small gap, continue
+  let advanced = false;
+  const next = () => { if (advanced) return; advanced = true; pump(); };
+  try {
+    const a = new Audio(url);
+    a.volume = Math.max(0, Math.min(1, volume));
+    a.addEventListener('ended', next, { once: true });
+    a.addEventListener('error', () => setTimeout(next, 40), { once: true });
+    a.play().then(() => {
+      // Safety advance in case 'ended' is missed.
+      const ms = (isFinite(a.duration) && a.duration > 0 ? a.duration * 1000 : 1500) + 150;
+      setTimeout(next, ms);
+    }).catch(() => setTimeout(next, 40));
+  } catch { setTimeout(next, 40); }
+}
+
 // Map server fx event types -> sound names.
 const FX_SOUND = {
   BIG_BOY: 'bigboy', LAWN_MOWER: 'lawnmower', GET_GOOSED: 'getgoosed',

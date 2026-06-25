@@ -3,7 +3,7 @@
 // Card art loads from cards/<KIND>.png; sounds from sounds/<event>.<ext>.
 
 import {
-  initAudio, playSound, fxSound, drawSound, setMuted, isMuted, setVolume, getVolume,
+  initAudio, playSound, enqueueSound, fxSound, drawSound, setMuted, isMuted, setVolume, getVolume,
 } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -257,7 +257,7 @@ function renderControls() {
   if ((p.wild || []).some((w) => w.kind === 'LAWN_MOWER')) {
     c.appendChild(btn('Play Lawn Mower', '', () => beginLawnTarget()));
   }
-  c.appendChild(btn('Draw a Goose Card  (ends turn)', 'btn-primary', () => sendWs('action', { action: { type: 'DRAW' } })));
+  c.appendChild(btn('Draw a Goose Card  (ends turn)', 'btn-primary', () => sendWs('action', { action: { type: 'DRAW' } }), { seqClick: true }));
 }
 function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tradeSel] } }); tradeMode = false; tradeSel.clear(); }
 
@@ -337,7 +337,9 @@ function handleFx() {
   lastFxId = fx.reduce((m, f) => Math.max(m, f.id), lastFxId);
   for (const f of fresh) {
     if (f.type === 'WIN') { playSound(f.actor === me().name ? 'win' : 'lose'); }
-    else if (f.type === 'DRAW') { playSound(drawSound(f.kind)); }
+    // DRAW and TURN go through the sequential queue (after the Draw click).
+    else if (f.type === 'DRAW') { enqueueSound(drawSound(f.kind)); }
+    else if (f.type === 'TURN') { enqueueSound('turn'); }
     else playSound(fxSound(f.type));
     if (f.type === 'BIG_BOY') slamOverlay();
     else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) flashEvent(f);
@@ -393,11 +395,13 @@ function addChat(from, text) {
 }
 
 // ---- utils ----
-function btn(label, cls, fn) {
+function btn(label, cls, fn, opts = {}) {
   const b = document.createElement('button');
   b.className = 'btn ' + (cls || '');
   b.textContent = label;
-  b.onclick = () => { playSound('click'); fn(); };
+  // seqClick routes the click into the sequential queue (used by Draw) so it
+  // leads the click→draw→turn chain instead of overlapping it.
+  b.onclick = () => { opts.seqClick ? enqueueSound('click') : playSound('click'); fn(); };
   return b;
 }
 function hint(text) { const s = document.createElement('div'); s.className = 'hintline'; s.textContent = text; return s; }
