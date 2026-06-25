@@ -115,7 +115,11 @@ function renderGame() {
 
   applyPile('gooseDraw', g.gooseDrawCount, PILE_BACKS.gooseDraw);
   applyPile('wildDraw', g.wildDrawCount, PILE_BACKS.wildDraw);
+  // Discard shows the goose card back, flipped upside down (see .pile-art CSS).
   $('gooseDiscard').querySelector('.pile-n').textContent = g.gooseDiscardCount;
+  const dOk = hasArt('GOOSE_CARD_BACK') && g.gooseDiscardCount > 0;
+  $('gooseDiscard').classList.toggle('empty', g.gooseDiscardCount === 0);
+  $('discardArt').style.backgroundImage = dOk ? `url(${artUrl.GOOSE_CARD_BACK})` : '';
 
   renderTurnBanner();
   renderPlayers();
@@ -170,7 +174,7 @@ function renderPlayers() {
       `<div class="pinfo">
         <div class="pname">${esc(p.name)}${p.id === playerId ? ' <span class="you">(you)</span>' : ''}</div>
         <div class="pscore">${scoreStr}<span class="max"> / 21</span></div>
-        <div class="pmeta">${p.regularCount} geese · ${p.wildCount} wild${p.connected ? '' : ' · away'}</div>
+        <div class="pmeta">${p.regularCount} goose card${p.regularCount === 1 ? '' : 's'} · ${p.wildCount} wild goose card${p.wildCount === 1 ? '' : 's'}${p.connected ? '' : ' · away'}</div>
         ${p.announcedBoutaGoose ? '<div class="pmeta"><span class="stamp goose">bouta goose</span></div>' : ''}
       </div>
       <div class="pgoose" style="${goose}"></div>`;
@@ -196,7 +200,8 @@ function renderMine() {
     reg.appendChild(el);
   });
   const total = (p.regular || []).reduce((s, c) => s + (cardMeta[c.kind]?.points || 0), 0);
-  $('handHint').textContent = `${p.regular ? p.regular.length : 0} geese · ${total} pts in geese`;
+  const n = p.regular ? p.regular.length : 0;
+  $('handHint').textContent = `${n} goose card${n === 1 ? '' : 's'} · ${total} pts`;
 }
 
 function cardEl(card, selectable) {
@@ -317,7 +322,7 @@ function renderOverlay() {
 
   const hasGang = (me().wild || []).some((w) => w.kind === 'GOOSE_GANG');
   const hasGoosed = (me().wild || []).some((w) => w.kind === 'GET_GOOSED');
-  cc.appendChild(btn('Take it (discard my geese)', '', () => respond('absorb')));
+  cc.appendChild(btn('Take it (discard my geese)', 'btn-danger', () => respond('absorb')));
   if (hasGang) cc.appendChild(btn('Play Goose Gang (block)', 'btn-primary', () => respond('goose_gang')));
   if (hasGoosed) cc.appendChild(btn('Play Get Goosed (divert)', '', () => { goosedChoosing = true; renderOverlay(); }));
 }

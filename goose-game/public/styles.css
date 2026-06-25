@@ -67,6 +67,7 @@ body {
 .btn-ghost { background: transparent; color: var(--cream); border-color: var(--cream); }
 .btn.block { display: block; width: 100%; }
 .btn-icon { background: var(--cream); color: var(--ink); border-color: var(--paper-edge); font-size: .8rem; }
+.btn-danger { background: var(--bad); border-color: #7e2018; color: var(--cream); font-weight: bold; text-transform: uppercase; letter-spacing: .05em; }
 
 .row { display: flex; gap: 10px; }
 input, select {
@@ -133,8 +134,10 @@ input::placeholder { color: #9a8d6e; }
 }
 .pile.wild { border-color: var(--bill-dark); }
 .pile.discard { box-shadow: 2px 2px 0 -1px rgba(0,0,0,.4); background: rgba(0,0,0,.25); }
-.pile .pile-l { font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; color: var(--cream); background: rgba(0,0,0,.55); padding: 3px 4px; text-align: center; line-height: 1.1; }
-.pile .pile-n { font-family: var(--display); font-size: 1.3rem; color: var(--cream); align-self: flex-end; background: rgba(0,0,0,.6); border-radius: 8px 0 0 0; padding: 0 8px; }
+.pile .pile-l { position: relative; z-index: 1; font-size: .58rem; text-transform: uppercase; letter-spacing: .06em; color: var(--cream); background: rgba(0,0,0,.55); padding: 3px 4px; text-align: center; line-height: 1.1; }
+.pile .pile-n { position: relative; z-index: 1; font-family: var(--display); font-size: 1.3rem; color: var(--cream); align-self: flex-end; background: rgba(0,0,0,.6); border-radius: 8px 0 0 0; padding: 0 8px; }
+/* discard art layer — the goose card back, flipped upside down */
+.pile-art { position: absolute; inset: 0; z-index: 0; background-size: cover; background-position: center; transform: rotate(180deg); }
 .pile.has-back .pile-l { background: rgba(0,0,0,.62); }
 .pile.empty { opacity: .4; }
 
@@ -264,7 +267,7 @@ input::placeholder { color: #9a8d6e; }
 /* ---------- animations ---------- */
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slamCard { 0% { transform: scale(2.4) rotate(8deg); opacity: 0; } 60% { opacity: 1; } 100% { transform: scale(1) rotate(-2deg); } }
-@keyframes slamBanner { 0% { transform: translate(-50%,-50%) rotate(-7deg) scale(2.6); opacity: 0; } 100% { transform: translate(-50%,-50%) rotate(-7deg) scale(1); opacity: 1; } }
+@keyframes slamBanner { 0% { transform: rotate(-3deg) scale(2.6); opacity: 0; } 100% { transform: rotate(-3deg) scale(1); opacity: 1; } }
 @keyframes honkPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(1.08); } }
 @keyframes stampIn { 0% { transform: scale(1.8) rotate(-6deg); opacity: 0; } 100% { transform: scale(1) rotate(0); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; } }
