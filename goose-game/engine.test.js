@@ -153,6 +153,17 @@ console.log('\n== Opponents never see what you drew (private log) ==');
   ok(!bSees, 'B does NOT see what A drew');
 }
 
+console.log('\n== Opponents cannot see your score ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 17 });
+  g.players[0].regular = [{ id: 'x', kind: 'GEESES' }];
+  const aView = redact(g, 'A');
+  const bView = redact(g, 'B');
+  eq(aView.players.find((x) => x.id === 'A').score, 4, 'A sees own score');
+  ok(bView.players.find((x) => x.id === 'A').score == null, 'B cannot see A score');
+  ok(bView.players.find((x) => x.id === 'B').score != null, 'B sees own score');
+}
+
 console.log('\n== Big Boy draw IS public + emits an fx event ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 16 });

@@ -165,10 +165,11 @@ function renderPlayers() {
     if (g.pending && g.pending.targetId === p.id) el.classList.add('target');
     if (!p.connected) el.classList.add('off');
     const goose = hasArt('GOOSE') ? `background-image:url(${artUrl.GOOSE})` : '';
+    const scoreStr = p.score == null ? '<span class="hidden-score">?</span>' : p.score;
     el.innerHTML =
       `<div class="pinfo">
         <div class="pname">${esc(p.name)}${p.id === playerId ? ' <span class="you">(you)</span>' : ''}</div>
-        <div class="pscore">${p.score}<span class="max"> / 21</span></div>
+        <div class="pscore">${scoreStr}<span class="max"> / 21</span></div>
         <div class="pmeta">${p.regularCount} geese · ${p.wildCount} wild${p.connected ? '' : ' · away'}</div>
         ${p.announcedBoutaGoose ? '<div class="pmeta"><span class="stamp goose">bouta goose</span></div>' : ''}
       </div>
@@ -259,23 +260,48 @@ function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tr
 function beginLawnTarget() { targetMode = true; toast('Pick a target — click a player.'); renderPlayers(); }
 function chooseLawnTarget(targetId) { targetMode = false; sendWs('action', { action: { type: 'PLAY_LAWN_MOWER', targetId } }); renderPlayers(); }
 
-// ---- Big Boy / Get Goosed overlay ----
+// ---- Big Boy / Win overlay ----
+let winDismissed = false;
 function renderOverlay() {
   const g = view.game;
   const ov = $('overlay');
+  const honk = $('overlayHonk'), banner = $('overlayBanner'), sub = $('overlaySub');
+  const card = $('overlayCard'), art = $('overlayArt'), cc = $('overlayControls');
+
+  // WIN — big banner across the middle for everyone
+  if (g.phase === 'GAME_OVER') {
+    if (winDismissed) { ov.classList.add('hidden'); return; }
+    const w = g.players.find((p) => p.id === g.winnerId);
+    ov.classList.remove('hidden'); ov.classList.add('win');
+    honk.textContent = '';
+    if (hasArt('GREAT_HONKEROR')) { card.style.display = ''; art.style.backgroundImage = `url(${artUrl.GREAT_HONKEROR})`; art.style.backgroundColor = ''; art.innerHTML = ''; }
+    else { card.style.display = 'none'; }
+    banner.textContent = w ? `${w.name} WINS!` : 'GAME OVER';
+    sub.textContent = w ? 'The Great Honkeror, Ruler of the Pond' : '';
+    cc.innerHTML = '';
+    if (playerId === view.hostId) cc.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
+    cc.appendChild(btn('View Board', 'btn-ghost', () => { winDismissed = true; renderOverlay(); }));
+    return;
+  }
+  winDismissed = false;
+  ov.classList.remove('win');
+
   const active = g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED';
   ov.classList.toggle('hidden', !active);
   if (!active) { goosedChoosing = false; return; }
 
-  const art = $('overlayArt');
+  // BIG BOY
+  honk.textContent = '((( HONK! HONK! )))';
+  banner.textContent = "QUIT GOOSIN' AROUND, YA GOOSE!";
+  sub.textContent = '';
+  card.style.display = '';
   art.style.backgroundImage = hasArt('BIG_BOY') ? `url(${artUrl.BIG_BOY})` : '';
   art.style.backgroundColor = hasArt('BIG_BOY') ? '' : (cardMeta.BIG_BOY?.color || '#7a2e2e');
-  if (!hasArt('BIG_BOY')) art.innerHTML = '<div style="display:flex;height:100%;align-items:center;justify-content:center;font-family:var(--display);color:var(--cream);font-size:2rem">BIG BOY</div>';
-  else art.innerHTML = '';
+  art.innerHTML = hasArt('BIG_BOY') ? '' : '<div style="display:flex;height:100%;align-items:center;justify-content:center;font-family:var(--display);color:var(--cream);font-size:2rem">BIG BOY</div>';
 
   const amTarget = g.pending && g.pending.targetId === playerId;
   const targetName = g.players.find((p) => p.id === g.pending.targetId)?.name || '';
-  const cc = $('overlayControls'); cc.innerHTML = '';
+  cc.innerHTML = '';
 
   if (!amTarget) { cc.appendChild(msg(`Big Boy is after ${esc(targetName)}…`)); return; }
 

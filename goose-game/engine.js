@@ -356,7 +356,8 @@ export function redact(state, viewerId) {
         id: p.id,
         name: p.name,
         connected: p.connected,
-        score: score(p),
+        // Only you can see your own score; opponents' points stay hidden.
+        score: isMe ? score(p) : null,
         announcedBoutaGoose: p.announcedBoutaGoose,
         regularCount: p.regular.length,
         wildCount: p.wild.length,
