@@ -454,7 +454,10 @@ function renderControls() {
   if (spectating) return;           // spectators can't act
   const g = view.game, p = me();
   if (g.phase === 'GAME_OVER') {
-    if (playerId === view.hostId) c.appendChild(btn('Rematch', 'btn-primary', () => sendWs('rematch')));
+    // After "View Board", keep Play Again (host) easy to reach, and let anyone
+    // pop the winner screen back up.
+    if (playerId === view.hostId) c.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
+    c.appendChild(btn('View Winner', 'btn-ghost', () => { winDismissed = false; renderOverlay(); }));
     return;
   }
   if (g.phase !== 'PRE_DRAW' || !isMyTurn()) return; // play-area shows status
