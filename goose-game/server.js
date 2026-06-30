@@ -84,6 +84,9 @@ function roomView(room, viewerId, asSpectator = false) {
     spectator: asSpectator,
     spectatorCount: (room.spectators || new Map()).size,
     boutaGooseRule: room.boutaGooseRule !== false,
+    // Named geese carried from a previous game, and whether we'll keep them.
+    carryNamesAvailable: !!(room.carryNames && room.carryNames.length),
+    keepNames: room.keepNames !== false,
     // Pre-game "silliest goose" vote: who voted for whom, and the result.
     votes: Object.fromEntries(room.votes || []),
     decided: room.decided || null,
@@ -139,6 +142,7 @@ function handle(ws, type, payload) {
     case 'addbot':    return doAddBot(ws, payload);
     case 'removebot': return doRemoveBot(ws, payload);
     case 'config':    return doConfig(ws, payload);
+    case 'setkeepnames': return doSetKeepNames(ws, payload);
     case 'action':    return doAction(ws, payload);
     case 'skip':      return doSkip(ws, payload);
     case 'kick':      return doKick(ws, payload);
@@ -240,6 +244,16 @@ function doConfig(ws, payload) {
   broadcast(room);
 }
 
+// Host chooses whether the next game keeps last game's named geese or starts
+// with a fresh, unnamed deck.
+function doSetKeepNames(ws, payload) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room || room.game) return;
+  if (ws.meta.playerId !== room.hostId) return;
+  room.keepNames = payload.keep !== false;
+  broadcast(room);
+}
+
 function doVote(ws, { candidateId }) {
   const room = getRoom(ws.meta.roomCode);
   if (!room || room.game || ws.meta.isSpectator) return;   // spectators watch only; you can still change your vote
@@ -336,7 +350,9 @@ function startGameFromVote(room) {
     boutaGooseRule: room.boutaGooseRule !== false,
     honkerorHolderId: room.lastWinnerId || null,
     firstSeat: firstSeat >= 0 ? firstSeat : 0,
-    carryNames: room.carryNames || null,   // named geese carried from last game
+    // Carry named geese only if the host kept them (works even when players
+    // were added/removed between games).
+    carryNames: (room.keepNames !== false) ? (room.carryNames || null) : null,
   });
   broadcast(room);
   maybeRunBot(room);
@@ -411,6 +427,7 @@ function doRematch(ws, payload) {
   clearTimeout(room.startTimer);
   room.game = null;
   room.decided = null;
+  room.keepNames = true;    // default each round to keeping last game's names (host can opt out)
   room.votes = new Map();   // re-vote on the silliest goose for the next round
   broadcast(room);
 }

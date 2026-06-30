@@ -297,9 +297,13 @@ input::placeholder { color: #9a8d6e; }
 .turn-flip .tf-name { font-family: var(--display); font-size: clamp(1.8rem, 3.4vw, 2.8rem); color: var(--cream); text-shadow: 3px 3px 0 var(--ink); margin-top: 4px; }
 .turn-flip.mine .tf-name { color: var(--bill); }
 
-/* caption under the big revealed draw — card name + goose names + name button */
+/* dim backdrop behind a draw/trade reveal so it reads as a centered popup
+   over whatever you were scrolled to */
+.reveal-backdrop { position: fixed; inset: 0; background: rgba(8,18,14,.74); z-index: 1; pointer-events: auto; animation: fadeIn .2s ease-out; }
+/* caption under the big revealed draw — viewport-centered (lives in the fixed
+   fly layer), card name + goose names + name button */
 .draw-caption {
-  position: absolute; left: 50%; bottom: 8%; transform: translateX(-50%);
+  position: fixed; left: 50%; bottom: 16%; transform: translateX(-50%);
   text-align: center; display: flex; flex-direction: column; gap: 8px; align-items: center;
   z-index: 95; pointer-events: auto;
 }
@@ -470,16 +474,18 @@ input::placeholder { color: #9a8d6e; }
 
   .stage-head    { order: 1; }                                 /* YOUR TURN prompt */
   .play-area     { order: 2; min-height: 150px; }              /* live play stage */
-  /* Draw / Trade buttons: sit in place when scrolled to the top, then stick to
-     the top of the scroll area as you scroll down so they're always reachable
-     and it's clear it's your turn. (mobile only) */
-  .stage-actions { order: 3; padding: 2px 0; position: sticky; top: 0; z-index: 20; }
+  /* Draw / Trade / Cancel buttons: pinned to the bottom of the screen so
+     they're always visible no matter where you've scrolled. (mobile only) */
+  .stage-actions { order: 3; padding: 2px 0; }
   .stage-actions:not(:empty) {
-    padding: 8px 6px;
-    background: var(--pond);
-    box-shadow: 0 7px 10px -5px rgba(0,0,0,.55);
-    border-radius: 0 0 12px 12px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    padding: 10px 12px; background: var(--pond);
+    box-shadow: 0 -7px 14px -2px rgba(0,0,0,.55);
   }
+  .table { padding-bottom: 88px; }   /* leave room so content clears the fixed action bar */
+  /* don't trap scrolling inside the trade card list — let the page scroll */
+  .trade-stage .ts-cards { max-height: none; overflow: visible; }
+  .trade-stage { height: auto; }
   .decks         { order: 4; }                                 /* deck row, full size */
   .players       { order: 5; }                                 /* the stack of players */
   .myhand        { order: 6; }                                 /* your gaggle, under players */

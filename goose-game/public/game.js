@@ -112,6 +112,7 @@ $('joinBtn').onclick = () => { leaving = false; playSound('click'); sendWs('join
 $('watchBtn').onclick = () => { leaving = false; playSound('click'); sendWs('spectate', { code: $('codeInput').value, name: $('nameInput').value || 'Spectator', playerId: spectatorId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
+$('keepNames').onchange = (e) => sendWs('setkeepnames', { keep: e.target.checked });
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
@@ -248,6 +249,9 @@ function renderWaiting() {
   }
 
   $('hostControls').classList.toggle('hidden', !isHost);
+  // "Keep last game's geese" — only when there are names to carry.
+  $('keepNamesRow').classList.toggle('hidden', !isHost || !view.carryNamesAvailable);
+  $('keepNames').checked = view.keepNames !== false;
   $('startBtn').disabled = !decided;   // enabled only once the vote is unanimous
 
   // Vote tally (members only — spectator votes don't count toward unanimity).
@@ -571,6 +575,84 @@ function renderWinHand(w) {
   box.appendChild(row);
 }
 
+// Render the winner's gaggle to a 9:16 PNG and download it. Same image on
+// desktop and mobile. Card art is same-origin so the canvas isn't tainted.
+function loadImg(src) {
+  return new Promise((res) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => res(null); im.src = src; });
+}
+function roundRectPath(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+async function downloadWinImage(w) {
+  try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch { /* ignore */ }
+  const W = 1080, H = 1920;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  // pond-green background
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2a5142'); g.addColorStop(0.25, '#1f4034'); g.addColorStop(1, '#163026');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  // title
+  ctx.fillStyle = '#e07a2e';
+  ctx.font = 'bold 120px Rye, Georgia, serif';
+  ctx.fillText('WINNING', W / 2, 170);
+  ctx.fillText('GAGGLE', W / 2, 300);
+  ctx.fillStyle = '#f1e7cf';
+  ctx.font = 'bold 56px "Special Elite", Georgia, serif';
+  ctx.fillText(`${w.name} — The Great Honkeror`, W / 2, 380);
+
+  const cards = [...(w.regular || []), ...(w.wild || [])];
+  const n = Math.max(1, cards.length);
+  const cols = n <= 4 ? 2 : (n <= 9 ? 3 : 4);
+  const rows = Math.ceil(n / cols);
+  const areaTop = 440, areaBottom = H - 70, areaW = W - 140, gap = 28, nameH = 46;
+  let cardW = (areaW - (cols - 1) * gap) / cols;
+  let cardH = cardW * 4 / 3;
+  let pitch = cardH + nameH + gap;
+  const maxPitch = (areaBottom - areaTop) / rows;
+  if (pitch > maxPitch) { const s = maxPitch / pitch; cardW *= s; cardH *= s; pitch *= s; }
+  const gridW = cols * cardW + (cols - 1) * gap;
+  const startX = (W - gridW) / 2;
+
+  const imgs = await Promise.all(cards.map((c) => (hasArt(c.kind) ? loadImg(artUrl[c.kind]) : Promise.resolve(null))));
+  cards.forEach((c, i) => {
+    const col = i % cols, row = Math.floor(i / cols);
+    const x = startX + col * (cardW + gap), y = areaTop + row * pitch;
+    const r = Math.max(8, cardW * 0.06);
+    ctx.fillStyle = '#f1e7cf'; roundRectPath(ctx, x, y, cardW, cardH, r); ctx.fill();
+    const im = imgs[i];
+    if (im) { ctx.save(); roundRectPath(ctx, x, y, cardW, cardH, r); ctx.clip(); ctx.drawImage(im, x, y, cardW, cardH); ctx.restore(); }
+    else {
+      ctx.fillStyle = cardMeta[c.kind]?.color || '#6b8e23';
+      roundRectPath(ctx, x, y, cardW, cardH, r); ctx.fill();
+      ctx.fillStyle = '#f1e7cf'; ctx.font = `bold ${Math.round(cardW * 0.12)}px Georgia, serif`;
+      ctx.fillText(cardMeta[c.kind]?.name || c.kind, x + cardW / 2, y + cardH / 2);
+    }
+    ctx.strokeStyle = '#2a2118'; ctx.lineWidth = Math.max(3, cardW * 0.02);
+    roundRectPath(ctx, x, y, cardW, cardH, r); ctx.stroke();
+    const names = (c.names || []).join(' · ');
+    if (names) {
+      ctx.fillStyle = '#f1e7cf'; ctx.font = `bold ${Math.round(Math.min(34, cardW * 0.14))}px Georgia, serif`;
+      ctx.fillText(names, x + cardW / 2, y + cardH + nameH * 0.7, cardW + gap);
+    }
+  });
+
+  try {
+    const a = document.createElement('a');
+    a.href = cv.toDataURL('image/png');
+    a.download = `winning-gaggle-${(w.name || 'goose').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { toast('Could not make the image on this browser.'); }
+}
+
 let winDismissed = false;
 function renderOverlay() {
   const g = view.game;
@@ -593,6 +675,7 @@ function renderOverlay() {
     renderWinHand(w);
     cc.innerHTML = '';
     if (playerId === view.hostId) cc.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
+    if (w && (w.regular || w.wild)) cc.appendChild(btn('Download Gaggle', '', () => downloadWinImage(w)));
     cc.appendChild(btn('View Board', 'btn-ghost', () => { winDismissed = true; renderOverlay(); }));
     return;
   }
@@ -726,12 +809,27 @@ function playerPanel(id) { return document.querySelector(`.player[data-pid="${id
 // sails it to your gaggle. Facedown opponent draws get a quick fly-by.
 function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
   const deck = fromEl || $('gooseDraw'), play = $('playArea'), layer = $('flyLayer');
-  if (!deck || !play || !layer) { onSettled && onSettled(); return; }
-  const fr = deck.getBoundingClientRect(), pr = play.getBoundingClientRect();
-  const w = fr.width, h = fr.height;
+  if (!deck || !layer) { onSettled && onSettled(); return; }
+  const fr = deck.getBoundingClientRect();
+  const w = fr.width || 72, h = fr.height || 96;
   const startCx = fr.left + w / 2, startCy = fr.top + h / 2;
-  const cdx = (pr.left + pr.width / 2) - startCx, cdy = (pr.top + pr.height / 2) - startCy;
-  const bigScale = Math.max(1.6, Math.min(4.5, (pr.height * 0.5) / h));
+  // A reveal (your own draw / wild trade) pops to the VIEWPORT center so you
+  // always see what you drew, even if you're scrolled to the chat/log. A
+  // facedown opponent draw just flies to their panel.
+  const centerX = reveal ? window.innerWidth / 2 : (play ? play.getBoundingClientRect().left + play.getBoundingClientRect().width / 2 : window.innerWidth / 2);
+  const centerY = reveal ? window.innerHeight / 2 : (play ? play.getBoundingClientRect().top + play.getBoundingClientRect().height / 2 : window.innerHeight / 2);
+  const cdx = centerX - startCx, cdy = centerY - startCy;
+  const bigScale = reveal
+    ? Math.max(1.8, Math.min(4.5, (window.innerHeight * 0.4) / h))
+    : Math.max(1.4, Math.min(3, ((play?.getBoundingClientRect().height || 200) * 0.4) / h));
+
+  let backdrop = null;
+  if (reveal) {
+    backdrop = document.createElement('div');
+    backdrop.className = 'reveal-backdrop';
+    layer.appendChild(backdrop);
+    laneBusy = true; // keep idle status from wiping the center reveal
+  }
 
   const card = document.createElement('div');
   card.className = 'fly-card';
@@ -740,7 +838,6 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
   else card.style.backgroundColor = faceKind ? (cardMeta[faceKind]?.color || '#caa') : '#1a3328';
   Object.assign(card.style, { left: `${fr.left}px`, top: `${fr.top}px`, width: `${w}px`, height: `${h}px` });
   layer.appendChild(card);
-  if (reveal) laneBusy = true; // keep idle status from wiping the center reveal
 
   const HOLD = reveal ? 3000 : 500;
   let caption = null, outTimer = null, settled = false;
@@ -748,6 +845,7 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
   const finish = () => {
     if (settled) return; settled = true;
     if (caption) caption.remove();
+    if (backdrop) backdrop.remove();
     card.remove();
     if (reveal) laneBusy = false;
     if (onSettled) onSettled();
@@ -755,7 +853,8 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
   };
   const flyOut = () => {
     if (caption) { caption.remove(); caption = null; }
-    const tr = (toEl || play).getBoundingClientRect();
+    if (backdrop) { backdrop.remove(); backdrop = null; }
+    const tr = (toEl || play || deck).getBoundingClientRect();
     const ddx = (tr.left + tr.width / 2) - startCx, ddy = (tr.top + tr.height / 2) - startCy;
     const destScale = toEl ? Math.max(0.4, (tr.height * 0.7) / h) : 1;
     const out = card.animate([
@@ -803,7 +902,7 @@ function buildDrawCaption(cardId, faceKind, hooks) {
     };
     tag.appendChild(b);
   }
-  $('playArea').appendChild(tag);
+  $('flyLayer').appendChild(tag);   // fixed layer → caption stays viewport-centered
   return tag;
 }
 
