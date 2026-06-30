@@ -1,7 +1,7 @@
 // Lightweight engine tests — no framework, just `node goose-game/engine.test.js`.
 // Validates the core rules in GOOSE_GAME_DESIGN.md against the pure engine.
 
-import { createGame, applyAction, score, makeRng, redact } from './engine.js';
+import { createGame, applyAction, score, makeRng, redact, collectNames, skipTurn, removePlayer } from './engine.js';
 import { CARD_META } from './cards.js';
 
 let pass = 0, fail = 0;
@@ -236,6 +236,55 @@ console.log('\n== Draw fx carries the card id for the reveal ==');
   applyAction(g, 'A', { type: 'DRAW' });
   const fx = redact(g, 'A').fx.find((f) => f.type === 'DRAW');
   ok(fx && fx.cardId, 'DRAW fx includes a cardId');
+}
+
+console.log('\n== Named geese carry into the next game ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 31 });
+  g.players[0].regular = [{ id: 'g1', kind: 'GEESE', names: ['Honk Jr', 'Quackary'] }];
+  const carried = collectNames(g);
+  ok(carried.some((e) => e.kind === 'GEESE' && e.names.length === 2), 'collectNames captured the named Geese');
+  const g2 = createGame(p('A', 'B'), { firstSeat: 0, seed: 32, carryNames: carried });
+  const named = g2.gooseDraw.filter((c) => c.names && c.names.length);
+  ok(named.length === 1 && named[0].kind === 'GEESE', 'a fresh Geese in the new deck inherited the carried names');
+  eq(named[0].names.join(','), 'Honk Jr,Quackary', 'carried names match');
+}
+
+console.log('\n== Host skip passes the turn ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 33 });
+  skipTurn(g);
+  eq(g.players[g.turnIndex].id, 'B', 'skip advanced from A to B');
+  ok(g.phase === 'PRE_DRAW', 'still pre-draw after skip');
+}
+
+console.log('\n== Host removes a player; geese scatter, play continues ==');
+{
+  const g = createGame(p('A', 'B', 'C'), { firstSeat: 0, seed: 34 });
+  g.players[1].regular = [{ id: 'b1', kind: 'GEESE' }, { id: 'b2', kind: 'GOOSE' }];
+  g.players[1].wild = [{ id: 'w1', kind: 'LAWN_MOWER' }];
+  const discardBefore = g.gooseDiscard.length;
+  const wildBefore = g.wildDraw.length;
+  removePlayer(g, 'B');
+  ok(g.players[1].removed, 'B is marked removed');
+  eq(g.players[1].regular.length, 0, 'B\'s regular hand cleared');
+  eq(g.gooseDiscard.length, discardBefore + 2, 'B\'s geese went to the discard');
+  eq(g.wildDraw.length, wildBefore + 1, 'B\'s wild card went back to the wild deck');
+  // A draws; turn should skip removed B and land on C.
+  applyAction(g, 'A', { type: 'DRAW' });
+  eq(g.players[g.turnIndex].id, 'C', 'turn skips the removed goose');
+}
+
+console.log('\n== Winner hand is revealed to everyone at game over ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 35, boutaGooseRule: true });
+  g.players[0].regular = Array.from({ length: 5 }, (_, i) => ({ id: `g${i}`, kind: 'GEESES' })); // 20
+  applyAction(g, 'A', { type: 'ANNOUNCE_GOOSE' });
+  stackGoose(g, ['GOOSE']);
+  applyAction(g, 'A', { type: 'DRAW' });   // A hits 21 and wins
+  const bView = redact(g, 'B').players.find((x) => x.id === 'A');
+  ok(Array.isArray(bView.regular), 'opponent B can see the winner A\'s hand at game over');
+  ok(bView.score >= 21, 'opponent B can see the winner\'s score at game over');
 }
 
 console.log('\n== Defending champion starts with Great Honkeror (+2) ==');

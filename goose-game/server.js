@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { createGame, applyAction, redact, makeRng, score } from './engine.js';
+import { createGame, applyAction, redact, makeRng, score, collectNames, skipTurn, removePlayer } from './engine.js';
 import { CARD_META, ANNOUNCE_AT } from './cards.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -140,6 +140,9 @@ function handle(ws, type, payload) {
     case 'removebot': return doRemoveBot(ws, payload);
     case 'config':    return doConfig(ws, payload);
     case 'action':    return doAction(ws, payload);
+    case 'skip':      return doSkip(ws, payload);
+    case 'kick':      return doKick(ws, payload);
+    case 'nudge':     return doNudge(ws, payload);
     case 'rematch':   return doRematch(ws, payload);
     case 'chat':      return doChat(ws, payload);
     default: send(ws, 'error', { message: `unknown message ${type}` });
@@ -224,7 +227,7 @@ function doConfig(ws, payload) {
 
 function doVote(ws, { candidateId }) {
   const room = getRoom(ws.meta.roomCode);
-  if (!room || room.game) return;                          // you can still change your vote
+  if (!room || room.game || ws.meta.isSpectator) return;   // spectators watch only; you can still change your vote
   if (!room.members.has(candidateId)) return;
   room.votes.set(ws.meta.playerId, candidateId);
   afterVoteChange(room);
@@ -318,6 +321,7 @@ function startGameFromVote(room) {
     boutaGooseRule: room.boutaGooseRule !== false,
     honkerorHolderId: room.lastWinnerId || null,
     firstSeat: firstSeat >= 0 ? firstSeat : 0,
+    carryNames: room.carryNames || null,   // named geese carried from last game
   });
   broadcast(room);
   maybeRunBot(room);
@@ -348,7 +352,7 @@ function runBotMove(room, actorId) {
   const action = responding ? botResponse(g, actorId) : botTurn(g, actorId);
   const { state } = applyAction(g, actorId, action);
   room.game = state;
-  if (state.winnerId) room.lastWinnerId = state.winnerId;
+  if (state.winnerId) { room.lastWinnerId = state.winnerId; room.carryNames = collectNames(state); }
   broadcast(room);
   maybeRunBot(room);
 }
@@ -402,9 +406,52 @@ function doAction(ws, { action }) {
   const { state, error } = applyAction(room.game, ws.meta.playerId, action);
   room.game = state;
   if (error) return send(ws, 'error', { message: error });
-  if (state.winnerId) room.lastWinnerId = state.winnerId;
+  if (state.winnerId) { room.lastWinnerId = state.winnerId; room.carryNames = collectNames(state); }
   broadcast(room);
   maybeRunBot(room);
+}
+
+// Host-only: skip the current turn / response, to keep play moving.
+function doSkip(ws) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room || !room.game) return;
+  if (ws.meta.playerId !== room.hostId) return send(ws, 'error', { message: 'Only the host can skip a turn.' });
+  room.game = skipTurn(room.game);
+  broadcast(room);
+  maybeRunBot(room);
+}
+
+// Host-only: remove a player; their geese scatter back into the decks and play
+// continues without them.
+function doKick(ws, { targetId }) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room || !room.game) return;
+  if (ws.meta.playerId !== room.hostId) return send(ws, 'error', { message: 'Only the host can remove a goose.' });
+  if (targetId === room.hostId) return send(ws, 'error', { message: "You can't remove yourself, host." });
+  room.game = removePlayer(room.game, targetId);
+  if (room.game.winnerId) { room.lastWinnerId = room.game.winnerId; room.carryNames = collectNames(room.game); }
+  broadcast(room);
+  maybeRunBot(room);
+}
+
+// Lobby nudge: a public "honk" reminding everyone to vote / agree. Throttled
+// per player so it can be playful without spamming the room.
+function doNudge(ws, { kind }) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room || room.game) return;                 // lobby only
+  const k = kind === 'unanimous' ? 'unanimous' : 'vote';
+  const member = room.members.get(ws.meta.playerId) || room.spectators.get(ws.meta.playerId);
+  if (!member) return;
+  const now = Date.now();
+  room.nudgeAt = room.nudgeAt || {};
+  if (now - (room.nudgeAt[ws.meta.playerId] || 0) < 2000) return;  // 2s cooldown
+  room.nudgeAt[ws.meta.playerId] = now;
+  const text = k === 'unanimous'
+    ? `${member.name} says: it's gotta be unanimous!`
+    : `${member.name} says: vote for the silliest goose!`;
+  const msg = { kind: k, text };
+  for (const m of room.members.values()) send(m.ws, 'nudge', msg);
+  for (const s of room.spectators.values()) send(s.ws, 'nudge', msg);
 }
 
 function doChat(ws, { text }) {

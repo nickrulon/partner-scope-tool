@@ -41,6 +41,34 @@ function buildDeck(deckName, rng) {
   return shuffle(cards, rng);
 }
 
+// Gather every named goose (from every pile + hand) as {kind, names} — used to
+// carry names from a finished game into the next one.
+export function collectNames(state) {
+  const out = [];
+  const scan = (arr) => {
+    for (const c of arr || []) {
+      if (NAMEABLE.has(c.kind) && Array.isArray(c.names) && c.names.length) {
+        out.push({ kind: c.kind, names: c.names.slice() });
+      }
+    }
+  };
+  for (const p of state.players) { scan(p.regular); scan(p.wild); }
+  scan(state.gooseDraw);
+  scan(state.gooseDiscard);
+  if (state.bigBoyCard) scan([state.bigBoyCard]);
+  return out;
+}
+
+// Stamp carried-over name-sets onto fresh, unnamed cards of the same kind.
+function applyCarriedNames(deck, carry) {
+  if (!Array.isArray(carry)) return;
+  for (const entry of carry) {
+    if (!entry || !NAMEABLE.has(entry.kind) || !Array.isArray(entry.names) || !entry.names.length) continue;
+    const card = deck.find((c) => c.kind === entry.kind && !c.names);
+    if (card) card.names = entry.names.slice(0, points(entry.kind));
+  }
+}
+
 export function score(player) {
   let s = 0;
   for (const c of player.regular) s += points(c.kind);
@@ -76,6 +104,10 @@ export function createGame(players, options = {}) {
     fx: [],
     fxSeq: 0,
   };
+
+  // Carry over geese players named last game: stamp those name-sets onto fresh
+  // cards of the same kind so the named geese live on into this game's deck.
+  applyCarriedNames(state.gooseDraw, options.carryNames);
 
   // Defending champion starts holding The Great Honkeror (+2).
   if (state.honkerorHolderId) {
@@ -151,7 +183,8 @@ function nextSeat(state) {
   const n = state.players.length;
   for (let step = 1; step <= n; step++) {
     const idx = (state.turnIndex + step) % n;
-    if (state.players[idx].connected) return idx;
+    const p = state.players[idx];
+    if (p.connected && !p.removed) return idx;
   }
   return state.turnIndex;
 }
@@ -178,6 +211,52 @@ function checkWin(state, player) {
   logMsg(state, `${player.name} reached ${score(player)} and is crowned THE GREAT HONKEROR!`, 'win');
   emitFx(state, 'WIN', { actor: player.name });
   return true;
+}
+
+// --- Host controls (skip / remove) --------------------------------------
+// These bypass normal turn rules; the server gates them to the host. They keep
+// a game moving when someone disconnects or stalls.
+
+export function skipTurn(state) {
+  if (state.phase === 'GAME_OVER') return state;
+  if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
+    // Stuck on a threat response — resolve it as "take the hit" and move on.
+    const target = findPlayer(state, state.pending.target);
+    if (target) discardRegularHand(state, target, 'their turn was skipped');
+    logMsg(state, `${target ? target.name : 'A goose'}'s response was skipped.`, 'bad');
+    finishThreat(state);
+    return state;
+  }
+  logMsg(state, `${activePlayer(state).name}'s turn was skipped by the host.`, 'bad');
+  endTurn(state);
+  return state;
+}
+
+export function removePlayer(state, playerId) {
+  const p = findPlayer(state, playerId);
+  if (!p || p.removed) return state;
+  // Scatter their geese back into the decks.
+  if (p.regular.length) { state.gooseDiscard.push(...p.regular); p.regular = []; }
+  if (p.wild.length) {
+    for (const c of p.wild) {
+      if (c.kind === 'GREAT_HONKEROR') state.wildDiscard.push(c); // champion bonus retires
+      else state.wildDraw.push(c);
+    }
+    p.wild = [];
+    state.wildDraw = shuffle(state.wildDraw, state.rng);
+  }
+  p.removed = true;
+  p.connected = false;
+  p.announcedBoutaGoose = false;
+  logMsg(state, `${p.name} was removed from the pond — their geese scattered back into the decks.`, 'bad');
+  if (state.phase === 'GAME_OVER') return state;
+  // Keep play moving if it was their turn or they owed a response.
+  if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
+    if (state.pending && state.pending.target === playerId) finishThreat(state);
+  } else if (activePlayer(state).id === playerId) {
+    endTurn(state);
+  }
+  return state;
 }
 
 // --- Action dispatch -----------------------------------------------------
@@ -386,18 +465,23 @@ export function redact(state, viewerId) {
     fx: state.fx.filter((f) => !f.to || f.to === viewerId).slice(-8),
     players: state.players.map((p) => {
       const isMe = p.id === viewerId;
+      // At game over the winner's whole hand is revealed to everyone (so the
+      // table can admire the winning gaggle + the geese's names).
+      const reveal = isMe || (state.phase === 'GAME_OVER' && p.id === state.winnerId);
       return {
         id: p.id,
         name: p.name,
         connected: p.connected,
-        // Only you can see your own score; opponents' points stay hidden.
-        score: isMe ? score(p) : null,
+        removed: !!p.removed,
+        // Only you can see your own score; opponents' points stay hidden
+        // (except the winner's, once the game is over).
+        score: reveal ? score(p) : null,
         announcedBoutaGoose: p.announcedBoutaGoose,
         regularCount: p.regular.length,
         wildCount: p.wild.length,
-        // Only the viewer sees their actual cards.
-        regular: isMe ? p.regular : undefined,
-        wild: isMe ? p.wild : undefined,
+        // Only the viewer sees their actual cards (plus the winner at game over).
+        regular: reveal ? p.regular : undefined,
+        wild: reveal ? p.wild : undefined,
       };
     }),
   };

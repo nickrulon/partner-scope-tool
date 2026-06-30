@@ -64,14 +64,16 @@ function connect() {
     else if (type === 'state') { view = payload; render(); }
     else if (type === 'error') { toast(payload.message); $('lobbyErr').textContent = payload.message; }
     else if (type === 'chat') { addChat(payload.from, payload.text); if (payload.from) playSound('honk'); }
+    else if (type === 'nudge') { nudgeBanner(payload.text); playSound(payload.kind); }
   };
   ws.onclose = () => { toast('Disconnected — reconnecting…'); setTimeout(connect, 1500); };
 }
 function sendWs(type, payload = {}) { ws.readyState === 1 && ws.send(JSON.stringify({ type, payload })); }
 
 // ---- lobby wiring ----
-$('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $('nameInput').value || 'Goose', playerId }); };
-$('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value || 'Goose', playerId }); };
+// Send the name blank if unset — the server assigns a fun honk-pun name.
+$('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $('nameInput').value, playerId }); };
+$('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value, playerId }); };
 $('watchBtn').onclick = () => { playSound('click'); sendWs('spectate', { code: $('codeInput').value, name: $('nameInput').value || 'Spectator', playerId: spectatorId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
@@ -80,6 +82,31 @@ $('boutaRule').onchange = (e) => sendWs('config', { boutaGooseRule: e.target.che
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() { const t = $('chatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('chatInput').value = ''; } }
+
+// ---- lobby: nudges + lobby chat ----
+let lastNudge = 0;
+function sendNudge(kind) {
+  const now = Date.now();
+  if (now - lastNudge < 2000) return;   // client-side throttle (server also enforces)
+  lastNudge = now;
+  playSound('click');
+  sendWs('nudge', { kind });
+}
+$('nudgeVote').onclick = () => sendNudge('vote');
+$('nudgeUnanimous').onclick = () => sendNudge('unanimous');
+$('lobbyChatSend').onclick = sendLobbyChat;
+$('lobbyChatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendLobbyChat(); });
+function sendLobbyChat() { const t = $('lobbyChatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('lobbyChatInput').value = ''; } }
+
+let nudgeTimer;
+function nudgeBanner(text) {
+  const el = $('nudgeBanner');
+  el.textContent = text;
+  el.classList.remove('hidden');
+  el.classList.add('show');
+  clearTimeout(nudgeTimer);
+  nudgeTimer = setTimeout(() => { el.classList.remove('show'); el.classList.add('hidden'); }, 2600);
+}
 
 // ---- sound controls ----
 function syncSoundUI() {
@@ -174,31 +201,38 @@ function renderWaiting() {
   $('hostControls').classList.toggle('hidden', !isHost);
   $('boutaRule').checked = view.boutaGooseRule !== false;
   $('boutaRule').disabled = !isHost;
-  // Start is the host's button, enabled only once the vote is unanimous.
-  $('startBtn').disabled = !decided;
-  $('startHint').textContent = decided
-    ? ''
-    : (view.members.length < 2 ? 'Add a computer (or share the code) — you need at least 2 geese.' : 'Everyone must agree on the silliest goose first.');
+  $('startBtn').disabled = !decided;   // enabled only once the vote is unanimous
 
-  // Spectator watching the lobby: read-only, with a clear "watching" framing.
+  // Vote tally (members only — spectator votes don't count toward unanimity).
+  const total = view.members.length;
+  const votedCount = view.members.filter((m) => votes[m.id]).length;
+  const allVoted = total >= 2 && votedCount === total;
+
+  // Compact status line near the vote list.
+  const status = $('voteStatus');
+  if (total < 2) status.textContent = 'need at least 2 geese';
+  else if (decided) status.textContent = 'Unanimous!';
+  else if (allVoted) status.textContent = `${votedCount}/${total} voted — not unanimous`;
+  else status.textContent = `${votedCount}/${total} voted`;
+  status.className = 'vote-status' + (decided ? ' good' : (allVoted ? ' split' : ''));
+
+  // Spectators just watch.
   if (spectating) {
-    $('voteExplain').innerHTML = `You're <strong>watching</strong> this pond. The geese are voting on who's the <strong>silliest</strong> — the game will begin once they agree.`;
-    $('waitHint').textContent = decided ? `Waiting for the host to start… (${esc(decided.name)} goes first)` : 'Watching the vote…';
+    $('startHint').textContent = '';
+    $('waitHint').textContent = decided
+      ? `Waiting for the host to start… (${esc(decided.name)} goes first)`
+      : "you're watchin' — the geese are votin'.";
     return;
   }
-  $('voteExplain').innerHTML = `Click the goose you reckon is the <strong>silliest</strong>. The game starts only once it's <strong>unanimous</strong> — and that goose goes first.`;
 
-  const voteCount = Object.keys(votes).length;
-  const total = view.members.length;
-  if (decided) {
-    $('waitHint').textContent = isHost ? '' : `Waiting for the host to start… (${esc(decided.name)} goes first)`;
-  } else if (total < 2) {
-    $('waitHint').textContent = isHost ? '' : 'Waiting for more geese…';
-  } else {
-    $('waitHint').textContent = myVote
-      ? `Not unanimous yet… (${voteCount}/${total} voted)`
-      : 'Tap a goose to vote for the silliest.';
-  }
+  // Spell out exactly why Start is disabled (host), or what's happening (others).
+  let reason;
+  if (total < 2) reason = 'Add a computer (or share the code) — need at least 2 geese.';
+  else if (decided) reason = 'It\'s been decided. Start when ready.';
+  else if (!allVoted) { const left = total - votedCount; reason = `Waitin' on ${left} ${left === 1 ? 'goose' : 'geese'} to vote.`; }
+  else reason = 'Votes are split — everyone must pick the same goose.';
+  $('startHint').textContent = isHost ? reason : '';
+  $('waitHint').textContent = isHost ? '' : (decided ? `Waiting for the host to start… (${esc(decided.name)} goes first)` : reason);
 }
 
 const me = () => view.game.players.find((p) => p.id === playerId);
@@ -271,16 +305,38 @@ function renderPlayers() {
     if (p.id === g.turnPlayerId) el.classList.add('active');
     if (g.pending && g.pending.targetId === p.id) el.classList.add('target');
     if (!p.connected) el.classList.add('off');
+    if (p.removed) el.classList.add('removed');
     const goose = hasArt('GOOSE') ? `background-image:url(${artUrl.GOOSE})` : '';
     const scoreStr = p.score == null ? '<span class="hidden-score">?</span>' : p.score;
+    const statusTail = p.removed ? ' · removed' : (p.connected ? '' : ' · away');
     el.innerHTML =
       `<div class="pinfo">
         <div class="pname">${esc(p.name)}${p.id === playerId ? ' <span class="you">(you)</span>' : ''}</div>
         <div class="pscore">${scoreStr}<span class="max"> / 21</span></div>
-        <div class="pmeta">${p.regularCount} goose card${p.regularCount === 1 ? '' : 's'} · ${p.wildCount} wild goose card${p.wildCount === 1 ? '' : 's'}${p.connected ? '' : ' · away'}</div>
+        <div class="pmeta">${p.regularCount} goose card${p.regularCount === 1 ? '' : 's'} · ${p.wildCount} wild goose card${p.wildCount === 1 ? '' : 's'}${statusTail}</div>
         ${p.announcedBoutaGoose ? '<div class="pmeta"><span class="stamp goose">bouta goose</span></div>' : ''}
       </div>
       <div class="pgoose" style="${goose}"></div>`;
+    // Host controls: skip the current turn, or remove a stuck/gone player.
+    if (!spectating && playerId === view.hostId && g.phase !== 'GAME_OVER') {
+      const hc = document.createElement('div');
+      hc.className = 'host-ctl';
+      if (p.id === g.turnPlayerId) {
+        const sk = document.createElement('button');
+        sk.className = 'hc-btn'; sk.textContent = 'skip';
+        sk.title = `Skip ${p.name}'s turn`;
+        sk.onclick = (e) => { e.stopPropagation(); playSound('click'); sendWs('skip'); };
+        hc.appendChild(sk);
+      }
+      if (p.id !== playerId && !p.removed) {
+        const rm = document.createElement('button');
+        rm.className = 'hc-btn danger'; rm.textContent = 'remove';
+        rm.title = `Remove ${p.name} from the game`;
+        rm.onclick = (e) => { e.stopPropagation(); playSound('click'); sendWs('kick', { targetId: p.id }); };
+        hc.appendChild(rm);
+      }
+      if (hc.children.length) el.appendChild(hc);
+    }
     if (targetMode && p.id !== playerId) {
       el.classList.add('selectable');
       el.onclick = () => chooseLawnTarget(p.id);
@@ -431,6 +487,36 @@ function beginLawnTarget() { targetMode = true; toast('Pick a target — click a
 function chooseLawnTarget(targetId) { targetMode = false; sendWs('action', { action: { type: 'PLAY_LAWN_MOWER', targetId } }); renderPlayers(); }
 
 // ---- Big Boy / Win overlay ----
+// Spread the winner's whole gaggle (regular + wild) under the banner so the
+// table can see every winning card and the names below them.
+function renderWinHand(w) {
+  const box = $('winHand');
+  box.innerHTML = '';
+  if (!w) return;
+  const cards = [...(w.regular || []), ...(w.wild || [])];
+  if (!cards.length) return;
+  const title = document.createElement('div');
+  title.className = 'wh-title';
+  title.textContent = 'the winning gaggle';
+  box.appendChild(title);
+  const row = document.createElement('div');
+  row.className = 'wh-cards';
+  for (const c of cards) {
+    const slot = document.createElement('div');
+    slot.className = 'card-slot';
+    slot.appendChild(cardEl(c, false));
+    const names = c.names || [];
+    if (names.length) {
+      const cap = document.createElement('div');
+      cap.className = 'card-cap';
+      cap.textContent = names.join(' · ');
+      slot.appendChild(cap);
+    }
+    row.appendChild(slot);
+  }
+  box.appendChild(row);
+}
+
 let winDismissed = false;
 function renderOverlay() {
   const g = view.game;
@@ -448,11 +534,13 @@ function renderOverlay() {
     else { card.style.display = 'none'; }
     banner.textContent = w ? `${w.name} WINS!` : 'GAME OVER';
     sub.textContent = w ? 'The Great Honkeror, Ruler of the Pond' : '';
+    renderWinHand(w);
     cc.innerHTML = '';
     if (playerId === view.hostId) cc.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
     cc.appendChild(btn('View Board', 'btn-ghost', () => { winDismissed = true; renderOverlay(); }));
     return;
   }
+  $('winHand').innerHTML = '';
   winDismissed = false;
   ov.classList.remove('win');
 
@@ -743,10 +831,14 @@ function renderLog() {
   box.scrollTop = box.scrollHeight;
 }
 function addChat(from, text) {
-  const box = $('chat');
-  const d = document.createElement('div');
-  d.innerHTML = `<span class="c-from">${esc(from)}:</span> ${esc(text)}`;
-  box.appendChild(d); box.scrollTop = box.scrollHeight;
+  // Same messages feed both the in-game Honk Chat and the lobby chat box.
+  for (const id of ['chat', 'lobbyChat']) {
+    const box = $(id);
+    if (!box) continue;
+    const d = document.createElement('div');
+    d.innerHTML = `<span class="c-from">${esc(from)}:</span> ${esc(text)}`;
+    box.appendChild(d); box.scrollTop = box.scrollHeight;
+  }
 }
 
 // ---- utils ----

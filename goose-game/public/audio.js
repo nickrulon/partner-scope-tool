@@ -16,7 +16,7 @@
 const SOUND_NAMES = [
   'click', 'drawgoose', 'drawgeese', 'drawgeeses', 'honk', 'bigboy',
   'lawnmower', 'getgoosed', 'goosegang', 'turn', 'win', 'lose',
-  'trade', 'announce', 'goosed', 'goosednoannounce',
+  'trade', 'announce', 'goosed', 'goosednoannounce', 'vote', 'unanimous',
 ];
 const EXTS = ['mp3', 'ogg', 'wav', 'm4a'];
 

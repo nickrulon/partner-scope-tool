@@ -39,8 +39,27 @@
       <div class="paper lobby-card">
         <div class="codepill">Room <strong id="roomCode"></strong></div>
         <div id="decidedMsg" class="decided hidden"></div>
-        <p id="voteExplain" class="vote-explain">Click the goose you reckon is the <strong>silliest</strong>. The game starts only once it's <strong>unanimous</strong> — and that goose goes first.</p>
+
+        <!-- startin' rules callout -->
+        <div id="voteRules" class="vote-rules">
+          <span class="vr-badge">startin' rules</span>
+          <ul class="vr-list">
+            <li>Vote for the goose you reckon is the <strong>silliest</strong>.</li>
+            <li>Game cain't start till everyone <strong>unanimously</strong> agrees.</li>
+            <li>The silliest goose goes <strong>first</strong>.</li>
+          </ul>
+          <div class="vr-foot">rules is rules.</div>
+        </div>
+
+        <div id="voteStatus" class="vote-status"></div>
         <div id="voteList" class="vote-list"></div>
+
+        <!-- nudge buttons -->
+        <div id="nudgeRow" class="nudge-row">
+          <button id="nudgeVote" class="btn nudge-btn">Vote!</button>
+          <button id="nudgeUnanimous" class="btn nudge-btn">Unanimous!</button>
+        </div>
+
         <div id="hostControls" class="host-controls hidden">
           <button id="addBotBtn" class="btn block">+ Add a Computer Goose</button>
           <label class="check"><input type="checkbox" id="boutaRule" checked />
@@ -49,6 +68,16 @@
           <p id="startHint" class="start-hint"></p>
         </div>
         <p id="waitHint" class="tag"></p>
+
+        <!-- lobby chat -->
+        <div class="lobby-honk">
+          <div class="lh-head">Lobby Honkin'</div>
+          <div id="lobbyChat" class="lh-msgs"></div>
+          <div class="row lh-row">
+            <input id="lobbyChatInput" maxlength="200" placeholder="talk some smack, holler in the chat…" />
+            <button id="lobbyChatSend" class="btn btn-primary">Honk</button>
+          </div>
+        </div>
       </div>
     </div>
   </section>
@@ -123,6 +152,7 @@
     <div class="overlay-card" id="overlayCard"><div id="overlayArt" class="overlay-art"></div></div>
     <div id="overlayBanner" class="overlay-banner">QUIT GOOSIN' AROUND, YA GOOSE!</div>
     <div id="overlaySub" class="overlay-sub"></div>
+    <div id="winHand" class="win-hand"></div>
     <div id="overlayControls" class="overlay-controls"></div>
   </div>
 
@@ -132,6 +162,7 @@
   <!-- audience view: mobile-only toggle for the log/chat bottom sheet -->
   <button id="specPanelToggle" class="spec-panel-toggle hidden">Log &amp; Chat</button>
 
+  <div id="nudgeBanner" class="nudge-banner hidden"></div>
   <div id="toast" class="toast hidden"></div>
   <script type="module" src="game.js"></script>
 </body>

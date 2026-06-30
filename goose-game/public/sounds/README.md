@@ -21,8 +21,11 @@ Supported extensions (first one found wins): **mp3, ogg, wav, m4a**.
 | `goosednoannounce` | a player hits 21 **without** announcing "I'm bout to goose" and gets goosed |
 | `win`       | someone wins |
 | `lose`      | you lose (the winner was someone else) |
+| `vote`      | a player taps the lobby "Vote!" nudge |
+| `unanimous` | a player taps the lobby "Unanimous!" nudge |
 
-Examples: `sounds/bigboy.mp3`, `sounds/honk.wav`.
+Examples: `sounds/bigboy.mp3`, `sounds/honk.wav`. The `vote`/`unanimous`
+nudge sounds are optional — missing files just stay silent.
 
 - Files are **optional** — anything missing is simply silent, so the game runs
   fine with no audio at all.
