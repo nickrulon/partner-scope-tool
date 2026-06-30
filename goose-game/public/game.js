@@ -30,12 +30,9 @@ const NAME_MAX = {
   GOOSE: 1, GEESE: 2, GEESES: 4,
   UNGOOSABLE: 1, GOOSE_GANG: 1, GET_GOOSED: 1, LAWN_MOWER: 1, GREAT_HONKEROR: 2,
 };
-// Playful suggestions shown as placeholders when naming a goose.
-const GOOSE_PUNS = [
-  'Honk Williams Jr.', 'Quackary', 'Sir Honks-a-lot', 'Gandalf the Greywing',
-  'Beyoncé Quackles', 'Honkleberry Finn', 'Duck Norris', 'Maya Anhonku',
-  'Quackie Chan', 'Vincent van Honk', 'Goosifer', 'Feathers McGraw',
-];
+// Playful suggestions shown as placeholders when naming a goose (one per name
+// slot — a Geeses shows all four).
+const GOOSE_PUNS = ['Honk Williams Jr.', 'Quackary', 'Honkuin Phoenix', 'Bill'];
 
 // ---- art probing (resolves real extension; sizes as cover) ----
 const artStatus = {}, artUrl = {};

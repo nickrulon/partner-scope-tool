@@ -460,7 +460,16 @@ input::placeholder { color: #9a8d6e; }
 
   .stage-head    { order: 1; }                                 /* YOUR TURN prompt */
   .play-area     { order: 2; min-height: 150px; }              /* live play stage */
-  .stage-actions { order: 3; padding: 2px 0; }                 /* Draw / Trade buttons */
+  /* Draw / Trade buttons: sit in place when scrolled to the top, then stick to
+     the top of the scroll area as you scroll down so they're always reachable
+     and it's clear it's your turn. (mobile only) */
+  .stage-actions { order: 3; padding: 2px 0; position: sticky; top: 0; z-index: 20; }
+  .stage-actions:not(:empty) {
+    padding: 8px 6px;
+    background: var(--pond);
+    box-shadow: 0 7px 10px -5px rgba(0,0,0,.55);
+    border-radius: 0 0 12px 12px;
+  }
   .decks         { order: 4; }                                 /* deck row, full size */
   .players       { order: 5; }                                 /* the stack of players */
   .myhand        { order: 6; }                                 /* your gaggle, under players */
