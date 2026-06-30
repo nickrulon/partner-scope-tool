@@ -435,6 +435,16 @@ input::placeholder { color: #9a8d6e; }
 .player.removed { opacity: .55; }
 .player.removed .pname { text-decoration: line-through; }
 
+/* ---------- leave game button ---------- */
+/* desktop: red button pinned to the bottom-left corner of the page */
+.leave-btn {
+  background: var(--bad); color: var(--cream); border-color: #7e2018;
+  font-weight: bold; text-transform: uppercase; letter-spacing: .04em;
+  position: fixed; bottom: 14px; left: 14px; z-index: 50;
+  box-shadow: 0 4px 12px rgba(0,0,0,.5);
+}
+.leave-btn:hover { filter: brightness(1.12); }
+
 /* ---------- winner's hand spread under the win banner ---------- */
 .win-hand { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: min(94vw, 760px); }
 .win-hand:empty { display: none; }
@@ -478,6 +488,8 @@ input::placeholder { color: #9a8d6e; }
   .rail-right .chat-panel  { order: 1; }
   .rail-right .log-panel   { order: 2; }
   .rail-right .sound-panel { order: 3; }
+  /* Leave Game flows at the very bottom (below Sounds) on mobile. */
+  .rail-right .leave-btn { order: 4; position: static; width: 100%; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
 
   /* Audience on a phone: same stage-first order; actions/hand are already
      hidden for spectators. Log & chat live in a bottom sheet behind a toggle. */

@@ -238,7 +238,10 @@ export function skipTurn(state) {
   return state;
 }
 
-export function removePlayer(state, playerId) {
+// opts.left = the player chose to leave (vs. host removed them) — only changes
+// wording. Either way their geese scatter back into the decks, and if fewer
+// than two geese remain the game ends.
+export function removePlayer(state, playerId, opts = {}) {
   const p = findPlayer(state, playerId);
   if (!p || p.removed) return state;
   // Scatter their geese back into the decks.
@@ -254,13 +257,22 @@ export function removePlayer(state, playerId) {
   p.removed = true;
   p.connected = false;
   p.announcedBoutaGoose = false;
-  logMsg(state, `${p.name} was removed from the pond — their geese scattered back into the decks.`, 'bad');
+  logMsg(state, `${p.name} ${opts.left ? 'left the pond' : 'was removed from the pond'} — their geese scattered back into the decks.`, 'bad');
+  emitFx(state, 'PLAYER_OUT', { actor: p.name, left: !!opts.left });
   if (state.phase === 'GAME_OVER') return state;
   // Keep play moving if it was their turn or they owed a response.
   if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
     if (state.pending && state.pending.target === playerId) finishThreat(state);
   } else if (activePlayer(state).id === playerId) {
     endTurn(state);
+  }
+  // Not enough geese left to keep going → the game ends (no winner).
+  if (state.players.filter((x) => !x.removed).length < 2) {
+    state.phase = 'GAME_OVER';
+    state.winnerId = null;
+    state.pending = null;
+    logMsg(state, 'Not enough geese left — the game has ended.', 'bad');
+    emitFx(state, 'ENDED', {});
   }
   return state;
 }

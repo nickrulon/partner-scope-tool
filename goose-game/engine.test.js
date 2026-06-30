@@ -276,6 +276,24 @@ console.log('\n== Host removes a player; geese scatter, play continues ==');
   eq(g.players[g.turnIndex].id, 'C', 'turn skips the removed goose');
 }
 
+console.log('\n== Leaving a 2-player game ends it (no winner) ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 41 });
+  removePlayer(g, 'B', { left: true });
+  eq(g.phase, 'GAME_OVER', 'game over after the 2nd-to-last goose leaves');
+  ok(g.winnerId == null, 'no winner — the game just ended');
+  ok(redact(g, 'A').fx.some((f) => f.type === 'PLAYER_OUT' && f.left), 'a PLAYER_OUT (left) fx was emitted');
+  ok(redact(g, 'A').fx.some((f) => f.type === 'ENDED'), 'an ENDED fx was emitted');
+}
+
+console.log('\n== Leaving a 3-player game keeps it going ==');
+{
+  const g = createGame(p('A', 'B', 'C'), { firstSeat: 0, seed: 42 });
+  removePlayer(g, 'B', { left: true });
+  ok(g.phase !== 'GAME_OVER', 'game continues with 2 geese left');
+  ok(g.players.find((x) => x.id === 'B').removed, 'B is out');
+}
+
 console.log('\n== Winner hand is revealed to everyone at game over ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 35, boutaGooseRule: true });

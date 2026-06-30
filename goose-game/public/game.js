@@ -151,6 +151,15 @@ function syncSoundUI() {
   $('volSlider').value = Math.round(getVolume() * 100);
 }
 $('specPanelToggle').onclick = () => { playSound('click'); document.body.classList.toggle('spec-panels-open'); };
+$('leaveBtn').onclick = () => {
+  if (!confirm('Leave the game? Your geese scatter back into the deck.')) return;
+  playSound('click');
+  sendWs('leave');
+  localStorage.removeItem(ROOM_KEY);   // don't auto-rejoin
+  view = null; spectating = false;
+  document.body.classList.remove('spectating');
+  showScreen('lobby');
+};
 $('soundToggle').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isMuted()) playSound('click'); };
 $('muteToggle').onchange = (e) => { setMuted(e.target.checked); syncSoundUI(); };
 $('volSlider').oninput = (e) => { setVolume(e.target.value / 100); };
@@ -570,10 +579,12 @@ function renderOverlay() {
     const w = g.players.find((p) => p.id === g.winnerId);
     ov.classList.remove('hidden'); ov.classList.add('win');
     honk.textContent = '';
-    if (hasArt('GREAT_HONKEROR')) { card.style.display = ''; art.style.backgroundImage = `url(${artUrl.GREAT_HONKEROR})`; art.style.backgroundColor = ''; art.innerHTML = ''; }
+    // Show the Honkeror trophy only for a real win; a no-winner end (everyone
+    // left) just shows the "game ended" banner.
+    if (w && hasArt('GREAT_HONKEROR')) { card.style.display = ''; art.style.backgroundImage = `url(${artUrl.GREAT_HONKEROR})`; art.style.backgroundColor = ''; art.innerHTML = ''; }
     else { card.style.display = 'none'; }
-    banner.textContent = w ? `${w.name} WINS!` : 'GAME OVER';
-    sub.textContent = w ? 'The Great Honkeror, Ruler of the Pond' : '';
+    banner.textContent = w ? `${w.name} WINS!` : 'GAME HAS ENDED';
+    sub.textContent = w ? 'The Great Honkeror, Ruler of the Pond' : 'not enough geese left in the pond';
     renderWinHand(w);
     cc.innerHTML = '';
     if (playerId === view.hostId) cc.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
@@ -657,6 +668,8 @@ function handleFx() {
       flyDraw({ faceKind: f.kind, cardId: f.cardId, reveal: true, fromEl: $('wildDraw'), toEl: $('myWild') });
     }
     else if (f.type === 'TURN') { if (!drawsThisBatch) playTurn(f); }
+    else if (f.type === 'PLAYER_OUT') { toast(`${f.actor} ${f.left ? 'left' : 'was removed from'} the room`); }
+    else if (f.type === 'ENDED') { /* the GAME_OVER overlay shows the "game ended" banner */ }
     else playSound(fxSound(f.type));
     if (f.type === 'BIG_BOY') slamOverlay();
     else if (['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY'].includes(f.type)) {

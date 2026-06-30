@@ -142,6 +142,7 @@ function handle(ws, type, payload) {
     case 'action':    return doAction(ws, payload);
     case 'skip':      return doSkip(ws, payload);
     case 'kick':      return doKick(ws, payload);
+    case 'leave':     return doLeave(ws, payload);
     case 'nudge':     return doNudge(ws, payload);
     case 'rematch':   return doRematch(ws, payload);
     case 'chat':      return doChat(ws, payload);
@@ -446,6 +447,28 @@ function doKick(ws, { targetId }) {
   if (room.game.winnerId) { room.lastWinnerId = room.game.winnerId; room.carryNames = collectNames(room.game); }
   broadcast(room);
   maybeRunBot(room);
+}
+
+// A player leaves voluntarily: scatter their geese back to the decks (like a
+// kick), drop them from the room, hand off host if needed, and end the game if
+// too few geese remain.
+function doLeave(ws) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room) return;
+  const pid = ws.meta.playerId;
+  if (ws.meta.isSpectator) { room.spectators.delete(pid); ws.meta.roomCode = null; broadcast(room); return; }
+  if (room.game && room.game.players.some((p) => p.id === pid && !p.removed)) {
+    room.game = removePlayer(room.game, pid, { left: true });
+  }
+  room.members.delete(pid);
+  room.votes.delete(pid);
+  ws.meta.roomCode = null;
+  // Hand off host if the host left.
+  if (pid === room.hostId) {
+    const next = [...room.members.values()].find((m) => !m.isBot && m.ws && m.ws.readyState === m.ws.OPEN);
+    if (next) room.hostId = next.playerId;
+  }
+  if (!room.game && !room.decided) afterVoteChange(room); else broadcast(room);
 }
 
 // Lobby nudge: a public "honk" reminding everyone to vote / agree. Throttled
