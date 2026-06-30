@@ -16,6 +16,7 @@ let spectatorId = localStorage.getItem(SID_KEY) || `s_${Math.random().toString(3
 localStorage.setItem(SID_KEY, spectatorId);
 
 let ws, cardMeta = {}, view = null;
+let leaving = false;               // true after Leave Game — ignore in-flight states until we (re)join
 let spectating = false;            // true while watching a game as audience
 let tradeMode = false, tradeSel = new Set();
 let targetMode = null;            // lawn-mower targeting (click a player)
@@ -90,8 +91,9 @@ function connect() {
       if (payload.playerId && !payload.spectator) { playerId = payload.playerId; localStorage.setItem(PID_KEY, playerId); }
       if (payload.code) localStorage.setItem(ROOM_KEY, payload.code);
       localStorage.setItem(MODE_KEY, payload.spectator ? 'watch' : 'play');
+      leaving = false;   // we (re)joined something — accept states again
     }
-    else if (type === 'state') { view = payload; render(); }
+    else if (type === 'state') { if (leaving) return; view = payload; render(); }
     else if (type === 'error') {
       toast(payload.message); $('lobbyErr').textContent = payload.message;
       if (/no room with that code/i.test(payload.message)) localStorage.removeItem(ROOM_KEY); // stale room — don't keep retrying
@@ -105,9 +107,9 @@ function sendWs(type, payload = {}) { ws.readyState === 1 && ws.send(JSON.string
 
 // ---- lobby wiring ----
 // Send the name blank if unset — the server assigns a fun honk-pun name.
-$('createBtn').onclick = () => { playSound('click'); sendWs('create', { name: $('nameInput').value, playerId }); };
-$('joinBtn').onclick = () => { playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value, playerId }); };
-$('watchBtn').onclick = () => { playSound('click'); sendWs('spectate', { code: $('codeInput').value, name: $('nameInput').value || 'Spectator', playerId: spectatorId }); };
+$('createBtn').onclick = () => { leaving = false; playSound('click'); sendWs('create', { name: $('nameInput').value, playerId }); };
+$('joinBtn').onclick = () => { leaving = false; playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value, playerId }); };
+$('watchBtn').onclick = () => { leaving = false; playSound('click'); sendWs('spectate', { code: $('codeInput').value, name: $('nameInput').value || 'Spectator', playerId: spectatorId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
@@ -154,6 +156,7 @@ $('specPanelToggle').onclick = () => { playSound('click'); document.body.classLi
 $('leaveBtn').onclick = () => {
   if (!confirm('Leave the game? Your geese scatter back into the deck.')) return;
   playSound('click');
+  leaving = true;                      // ignore any in-flight game states from here
   sendWs('leave');
   localStorage.removeItem(ROOM_KEY);   // don't auto-rejoin
   view = null; spectating = false;
