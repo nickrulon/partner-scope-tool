@@ -589,25 +589,41 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
-async function downloadWinImage(w) {
+// Draw an image "cover" style (fill the box, preserve aspect, crop overflow)
+// so card art is never stretched.
+function drawCover(ctx, img, x, y, w, h) {
+  const ir = img.width / img.height, dr = w / h;
+  let sw, sh, sx, sy;
+  if (ir > dr) { sh = img.height; sw = sh * dr; sx = (img.width - sw) / 2; sy = 0; }
+  else { sw = img.width; sh = sw / dr; sx = 0; sy = (img.height - sh) / 2; }
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+// Shrink the font until the text fits maxWidth (so nothing runs off the edge).
+function fitFont(ctx, text, maxPx, maxWidth, family) {
+  let px = maxPx;
+  while (px > 14) { ctx.font = `bold ${px}px ${family}`; if (ctx.measureText(text).width <= maxWidth) break; px -= 2; }
+}
+// `win` is a window opened in the click gesture; we drop the image into it so
+// mobile users can press-and-hold → Save Image (to the camera roll). Falls back
+// to a file download if no window is available.
+async function downloadWinImage(w, win) {
   try { if (document.fonts && document.fonts.ready) await document.fonts.ready; } catch { /* ignore */ }
   const W = 1080, H = 1920;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
-  // pond-green background
   const g = ctx.createLinearGradient(0, 0, 0, H);
   g.addColorStop(0, '#2a5142'); g.addColorStop(0.25, '#1f4034'); g.addColorStop(1, '#163026');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center';
-  // title
   ctx.fillStyle = '#e07a2e';
   ctx.font = 'bold 120px Rye, Georgia, serif';
   ctx.fillText('WINNING', W / 2, 170);
   ctx.fillText('GAGGLE', W / 2, 300);
   ctx.fillStyle = '#f1e7cf';
-  ctx.font = 'bold 56px "Special Elite", Georgia, serif';
-  ctx.fillText(`${w.name} — The Great Honkeror`, W / 2, 380);
+  const sub = `${w.name} — The Great Honkeror`;
+  fitFont(ctx, sub, 52, W - 100, '"Special Elite", Georgia, serif');  // shrink to fit width
+  ctx.fillText(sub, W / 2, 380);
 
   const cards = [...(w.regular || []), ...(w.wild || [])];
   const n = Math.max(1, cards.length);
@@ -629,28 +645,40 @@ async function downloadWinImage(w) {
     const r = Math.max(8, cardW * 0.06);
     ctx.fillStyle = '#f1e7cf'; roundRectPath(ctx, x, y, cardW, cardH, r); ctx.fill();
     const im = imgs[i];
-    if (im) { ctx.save(); roundRectPath(ctx, x, y, cardW, cardH, r); ctx.clip(); ctx.drawImage(im, x, y, cardW, cardH); ctx.restore(); }
+    if (im) { ctx.save(); roundRectPath(ctx, x, y, cardW, cardH, r); ctx.clip(); drawCover(ctx, im, x, y, cardW, cardH); ctx.restore(); }
     else {
       ctx.fillStyle = cardMeta[c.kind]?.color || '#6b8e23';
       roundRectPath(ctx, x, y, cardW, cardH, r); ctx.fill();
-      ctx.fillStyle = '#f1e7cf'; ctx.font = `bold ${Math.round(cardW * 0.12)}px Georgia, serif`;
+      ctx.fillStyle = '#f1e7cf'; fitFont(ctx, cardMeta[c.kind]?.name || c.kind, Math.round(cardW * 0.13), cardW - 12, 'Georgia, serif');
       ctx.fillText(cardMeta[c.kind]?.name || c.kind, x + cardW / 2, y + cardH / 2);
     }
     ctx.strokeStyle = '#2a2118'; ctx.lineWidth = Math.max(3, cardW * 0.02);
     roundRectPath(ctx, x, y, cardW, cardH, r); ctx.stroke();
     const names = (c.names || []).join(' · ');
     if (names) {
-      ctx.fillStyle = '#f1e7cf'; ctx.font = `bold ${Math.round(Math.min(34, cardW * 0.14))}px Georgia, serif`;
-      ctx.fillText(names, x + cardW / 2, y + cardH + nameH * 0.7, cardW + gap);
+      ctx.fillStyle = '#f1e7cf';
+      fitFont(ctx, names, Math.min(34, Math.round(cardW * 0.16)), cardW + gap - 6, 'Georgia, serif');
+      ctx.fillText(names, x + cardW / 2, y + cardH + nameH * 0.7);
     }
   });
 
-  try {
-    const a = document.createElement('a');
-    a.href = cv.toDataURL('image/png');
-    a.download = `winning-gaggle-${(w.name || 'goose').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
-    document.body.appendChild(a); a.click(); a.remove();
-  } catch (e) { toast('Could not make the image on this browser.'); }
+  let dataUrl;
+  try { dataUrl = cv.toDataURL('image/png'); }
+  catch (e) { if (win) win.close(); toast('Could not make the image on this browser.'); return; }
+  if (win && !win.closed) {
+    try {
+      win.document.title = 'Winning Gaggle';
+      win.document.body.style.cssText = 'margin:0;background:#163026;display:flex;flex-direction:column;align-items:center;font-family:Georgia,serif';
+      win.document.body.innerHTML =
+        `<p style="color:#f1e7cf;margin:14px 12px;text-align:center;font-size:15px">Press &amp; hold the image to save it to your photos.</p>` +
+        `<img src="${dataUrl}" alt="Winning Gaggle" style="display:block;width:100%;max-width:540px;height:auto" />`;
+      return;
+    } catch (e) { /* couldn't write to the window — fall through to download */ }
+  }
+  const a = document.createElement('a');
+  a.href = dataUrl;
+  a.download = `winning-gaggle-${(w.name || 'goose').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 let winDismissed = false;
@@ -675,7 +703,14 @@ function renderOverlay() {
     renderWinHand(w);
     cc.innerHTML = '';
     if (playerId === view.hostId) cc.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
-    if (w && (w.regular || w.wild)) cc.appendChild(btn('Download Gaggle', '', () => downloadWinImage(w)));
+    if (w && (w.regular || w.wild)) {
+      const saveBtn = btn('Save Gaggle', '', () => {
+        const win = window.open('about:blank', '_blank'); // opened in the gesture → not popup-blocked
+        downloadWinImage(w, win);
+      });
+      saveBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:7px"><path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>Save Gaggle';
+      cc.appendChild(saveBtn);
+    }
     cc.appendChild(btn('View Board', 'btn-ghost', () => { winDismissed = true; renderOverlay(); }));
     return;
   }
