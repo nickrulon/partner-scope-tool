@@ -908,6 +908,7 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
     if (reveal) caption = buildDrawCaption(cardId, faceKind, {
       pause: () => clearTimeout(outTimer),
       resume: () => { outTimer = setTimeout(flyOut, 700); },
+      dismiss: () => { clearTimeout(outTimer); flyOut(); },
     });
     outTimer = setTimeout(flyOut, HOLD);
   };
@@ -937,6 +938,12 @@ function buildDrawCaption(cardId, faceKind, hooks) {
     };
     tag.appendChild(b);
   }
+  // "Later" — dismiss the reveal now without naming (cream button under the orange one).
+  const later = document.createElement('button');
+  later.className = 'btn dc-btn dc-later';
+  later.textContent = 'Later';
+  later.onclick = () => { playSound('click'); hooks.dismiss(); };
+  tag.appendChild(later);
   $('flyLayer').appendChild(tag);   // fixed layer → caption stays viewport-centered
   return tag;
 }
