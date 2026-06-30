@@ -108,6 +108,10 @@ input::placeholder { color: #9a8d6e; }
 .check.small { color: var(--ink); }
 .check input { width: auto; }
 
+/* back-to-lobby button, top-left of the waiting room */
+.back-btn { position: absolute; top: 16px; left: 16px; z-index: 5; background: var(--cream); color: var(--ink); border-color: var(--paper-edge); font-size: .85rem; padding: 8px 14px; }
+.back-btn:hover { border-color: var(--bill); }
+
 /* ---------- silliest-goose vote (waiting room) ---------- */
 .vote-explain { font-size: .82rem; color: var(--ink-soft); margin: 0 0 12px; line-height: 1.35; }
 .vote-explain strong { color: var(--bill-dark); }

@@ -113,6 +113,16 @@ $('watchBtn').onclick = () => { leaving = false; playSound('click'); sendWs('spe
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
 $('keepNames').onchange = (e) => sendWs('setkeepnames', { keep: e.target.checked });
+// Leave the room from the waiting screen and return to the create/join lobby.
+$('backBtn').onclick = () => {
+  playSound('click');
+  leaving = true;
+  sendWs('leave');
+  localStorage.removeItem(ROOM_KEY);
+  view = null; spectating = false;
+  document.body.classList.remove('spectating');
+  showScreen('lobby');
+};
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
