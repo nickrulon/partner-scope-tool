@@ -98,7 +98,14 @@ function connect() {
       toast(payload.message); $('lobbyErr').textContent = payload.message;
       if (/no room with that code/i.test(payload.message)) localStorage.removeItem(ROOM_KEY); // stale room — don't keep retrying
     }
-    else if (type === 'chat') { addChat(payload.from, payload.text); if (payload.from) playSound('honk'); }
+    else if (type === 'chat') {
+      addChat(payload.from, payload.text);
+      if (payload.from) {
+        playSound('honk');
+        // count unread honk chats while the Log & Chat sheet is closed; badge pulses
+        if (!document.body.classList.contains('spec-panels-open')) { unreadChats++; bumpChatBadge(); }
+      }
+    }
     else if (type === 'nudge') { nudgeBanner(payload.text); playSound(payload.kind); }
   };
   ws.onclose = () => { toast('Disconnected — reconnecting…'); setTimeout(connect, 1500); };
@@ -163,7 +170,19 @@ function syncSoundUI() {
   $('muteToggle').checked = isMuted();
   $('volSlider').value = Math.round(getVolume() * 100);
 }
-$('specPanelToggle').onclick = () => { playSound('click'); document.body.classList.toggle('spec-panels-open'); };
+let unreadChats = 0;
+function bumpChatBadge() {
+  const badge = $('chatBadge');
+  badge.textContent = unreadChats > 9 ? '9+' : String(unreadChats);
+  badge.classList.toggle('hidden', unreadChats <= 0);
+  if (unreadChats > 0) { badge.classList.remove('pulse'); void badge.offsetWidth; badge.classList.add('pulse'); }
+}
+$('specPanelToggle').onclick = () => {
+  playSound('click');
+  const opening = !document.body.classList.contains('spec-panels-open');
+  document.body.classList.toggle('spec-panels-open');
+  if (opening) { unreadChats = 0; bumpChatBadge(); }   // opened the sheet → chats are "read"
+};
 $('leaveBtn').onclick = () => {
   if (!confirm('Leave the game? Your geese scatter back into the deck.')) return;
   playSound('click');
@@ -209,6 +228,10 @@ function resetTransient() {
   winDismissed = false; laneBusy = false;
   tradeMode = false; tradeSel.clear(); targetMode = null; goosedChoosing = false;
   fxPrimed = false; lastFxId = 0;
+  // Log & Chat sheet only exists in-game.
+  $('specPanelToggle').classList.add('hidden');
+  document.body.classList.remove('spec-panels-open');
+  unreadChats = 0; if ($('chatBadge')) $('chatBadge').classList.add('hidden');
 }
 
 function renderWaiting() {
@@ -303,11 +326,11 @@ function renderGame() {
   const g = view.game;
   $('gRoomName').textContent = view.code;
   $('gPlayerCount').textContent = `${g.players.length} geese`;
-  // Spectator badge in the top bar.
+  // Spectator badge in the top bar; Log & Chat toggle shows in-game for everyone
+  // (CSS only displays it on mobile).
   $('specBadge').classList.toggle('hidden', !spectating);
-  $('specPanelToggle').classList.toggle('hidden', !spectating);
+  $('specPanelToggle').classList.remove('hidden');
   if (spectating) $('specBadge').textContent = `WATCHING${view.spectatorCount > 1 ? ` · ${view.spectatorCount} viewers` : ''}`;
-  else document.body.classList.remove('spec-panels-open');
 
   applyPile('gooseDraw', g.gooseDrawCount, PILE_BACKS.gooseDraw);
   applyPile('wildDraw', g.wildDrawCount, PILE_BACKS.wildDraw);

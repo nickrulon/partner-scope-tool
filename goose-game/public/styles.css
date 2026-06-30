@@ -437,7 +437,17 @@ input::placeholder { color: #9a8d6e; }
 .spectating .player { cursor: default; }
 /* the live stage is the broadcast focus */
 .spectating .play-area { border-style: solid; border-color: rgba(224,122,46,.35); }
-.spec-panel-toggle { display: none; }
+.spec-panel-toggle { display: none; position: relative; }
+/* unread honk-chat count, top-left of the Log & Chat toggle */
+.chat-badge {
+  position: absolute; top: -9px; left: -9px; min-width: 22px; height: 22px; padding: 0 5px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bad); color: var(--cream); border: 2px solid var(--cream);
+  border-radius: 11px; font-family: var(--type); font-size: .72rem; font-weight: bold; line-height: 1;
+  box-shadow: 0 2px 5px rgba(0,0,0,.5);
+}
+.chat-badge.pulse { animation: badgePulse .55s ease-out; }
+@keyframes badgePulse { 0% { transform: scale(1); } 40% { transform: scale(1.55); } 100% { transform: scale(1); } }
 
 /* ---------- host in-game controls (skip / remove) ---------- */
 .host-ctl { position: absolute; top: 6px; right: 8px; display: flex; gap: 6px; z-index: 2; }
@@ -482,43 +492,43 @@ input::placeholder { color: #9a8d6e; }
 
   .stage-head    { order: 1; }                                 /* YOUR TURN prompt */
   .play-area     { order: 2; min-height: 150px; }              /* live play stage */
-  /* Draw / Trade / Cancel buttons: pinned to the bottom of the screen so
-     they're always visible no matter where you've scrolled. (mobile only) */
+  /* Draw / Trade / Cancel buttons: pinned near the bottom (just above the
+     Log & Chat toggle) so they're always visible no matter where you've
+     scrolled. (mobile only) */
   .stage-actions { order: 3; padding: 2px 0; }
   .stage-actions:not(:empty) {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+    position: fixed; left: 0; right: 0; bottom: 58px; z-index: 60;
     padding: 10px 12px; background: var(--pond);
     box-shadow: 0 -7px 14px -2px rgba(0,0,0,.55);
   }
-  .table { padding-bottom: 88px; }   /* leave room so content clears the fixed action bar */
+  .table { padding-bottom: 160px; }   /* clear the fixed action bar + Log&Chat toggle */
   /* don't trap scrolling inside the trade card list — let the page scroll */
   .trade-stage .ts-cards { max-height: none; overflow: visible; }
   .trade-stage { height: auto; }
   .decks         { order: 4; }                                 /* deck row, full size */
   .players       { order: 5; }                                 /* the stack of players */
   .myhand        { order: 6; }                                 /* your gaggle, under players */
-  .rail-right    { order: 7; display: flex; flex-direction: column; gap: 12px; grid-template-rows: none; }
-  /* Honk Chat above the Activity Log on mobile (desktop keeps its order). */
-  .rail-right .chat-panel  { order: 1; }
-  .rail-right .log-panel   { order: 2; }
-  .rail-right .sound-panel { order: 3; }
-  /* Leave Game flows at the very bottom (below Sounds) on mobile. */
-  .rail-right .leave-btn { order: 4; position: static; width: 100%; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
 
-  /* Audience on a phone: same stage-first order; actions/hand are already
-     hidden for spectators. Log & chat live in a bottom sheet behind a toggle. */
-  body.spectating .spec-panel-toggle {
-    display: block; position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%);
+  /* Log & Chat (+ Sounds + Leave) live in a bottom sheet behind a toggle for
+     EVERYONE on mobile (players too) — no more scrolling a long right rail. */
+  .rail-right { display: none; }
+  .spec-panel-toggle {
+    display: block; position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%);
     z-index: 110; background: var(--bill); color: #2a1500; border-color: var(--bill-dark);
     font-weight: bold; text-transform: uppercase; letter-spacing: .05em; box-shadow: 0 4px 14px rgba(0,0,0,.5);
   }
-  body.spectating .rail-right { display: none; }
-  body.spectating.spec-panels-open .rail-right {
-    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 109;
-    max-height: 64vh; overflow-y: auto; padding: 14px 12px 60px;
+  body.spec-panels-open .rail-right {
+    display: flex; flex-direction: column; gap: 12px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 109;
+    max-height: 76vh; overflow-y: auto; padding: 14px 12px 70px;
     background: var(--pond-deep); border-top: 3px solid var(--bill);
     box-shadow: 0 -8px 24px rgba(0,0,0,.5);
   }
+  /* Honk Chat above the Activity Log; Sounds then Leave at the bottom. */
+  .rail-right .chat-panel  { order: 1; }
+  .rail-right .log-panel   { order: 2; }
+  .rail-right .sound-panel { order: 3; }
+  .rail-right .leave-btn { order: 4; position: static; width: 100%; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
 
   /* WIN overlay on mobile: scroll top-to-bottom (nothing clipped), small
      trophy, single scrollable row of winning cards, buttons pinned to bottom. */
