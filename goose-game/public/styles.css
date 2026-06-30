@@ -137,7 +137,8 @@ input::placeholder { color: #9a8d6e; }
 .lh-msgs div { padding: 2px 0; }
 .lh-msgs .c-from { color: var(--bill-dark); font-weight: bold; }
 .lh-row { gap: 8px; }
-.lh-row input { flex: 1; min-width: 0; }
+.lh-row input { flex: 1; min-width: 0; font-size: .82rem; }  /* smaller so the placeholder fits */
+.lh-row input::placeholder { font-size: .82rem; }
 
 /* nudge banner (top-center, playful honk reminder) */
 .nudge-banner { position: fixed; top: 18px; left: 50%; transform: translateX(-50%); z-index: 130; background: var(--bill); color: #2a1500; border: 2px solid var(--bill-dark); border-radius: 10px; padding: 10px 20px; font-family: var(--display); font-size: 1.05rem; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
