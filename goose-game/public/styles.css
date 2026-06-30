@@ -125,15 +125,18 @@ input::placeholder { color: #9a8d6e; }
 .vote-status.good { color: var(--good); font-weight: bold; }
 
 /* lobby nudge buttons — small, sit inline on the right of the chat header */
-.nudge-row { display: flex; gap: 6px; }
-.nudge-btn { background: var(--cream); color: var(--ink); border-color: var(--bill); font-weight: bold; letter-spacing: .02em; font-size: .72rem; padding: 5px 10px; box-shadow: 0 2px 0 rgba(0,0,0,.25); }
-.nudge-btn:hover { background: var(--bill); color: #2a1500; }
+.nudge-row { display: flex; gap: 10px; justify-content: center; }
+.nudge-btn { background: var(--bill); color: #2a1500; border-color: var(--bill-dark); font-weight: bold; text-transform: uppercase; letter-spacing: .04em; font-size: .9rem; padding: 9px 18px; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
+.nudge-btn:hover { filter: brightness(1.1); }
 
 /* lobby chat ("Lobby Honkin'") */
 .lobby-honk { margin-top: 12px; border-top: 2px solid var(--paper-edge); padding-top: 10px; }
-.lh-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-.lh-title { font-family: var(--display); font-size: 1rem; color: var(--bill-dark); }
+/* centered header, with the Vote!/Holler buttons on their own row below it */
+.lh-head { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 10px; }
+.lh-title { font-family: var(--display); font-size: 1.2rem; color: var(--bill-dark); text-align: center; }
 .lh-msgs { height: 96px; overflow-y: auto; font-size: .82rem; color: var(--ink); background: #fbf6e7; border: 2px solid var(--paper-edge); border-radius: 8px; padding: 6px 8px; margin-bottom: 8px; }
+/* empty-state hint so it's clear this is where chat appears (not the input) */
+.lh-msgs:empty::before { content: 'honks from the pond show up here…'; color: #9a8d6e; font-style: italic; }
 .lh-msgs div { padding: 2px 0; }
 .lh-msgs .c-from { color: var(--bill-dark); font-weight: bold; }
 .lh-row { gap: 8px; }

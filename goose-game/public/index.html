@@ -35,7 +35,7 @@
   <section id="waiting" class="screen lobby hidden">
     <div class="lobby-inner">
       <h1 class="logo small">The Pond</h1>
-      <p class="tag">Share the code, then settle the only question that matters.</p>
+      <p class="tag">Share the code and vote for the silliest goose.</p>
       <div class="paper lobby-card">
         <div class="codepill">Room <strong id="roomCode"></strong></div>
         <div id="decidedMsg" class="decided hidden"></div>
@@ -56,8 +56,6 @@
 
         <div id="hostControls" class="host-controls hidden">
           <button id="addBotBtn" class="btn block">+ Add a Computer Goose</button>
-          <label class="check"><input type="checkbox" id="boutaRule" checked />
-            <span>Use the "I'm bouta goose!" rule — must announce at 17 to win</span></label>
           <button id="startBtn" class="btn btn-primary block" disabled>Start Goosin'</button>
           <p id="startHint" class="start-hint"></p>
         </div>
@@ -68,6 +66,7 @@
           <div class="lh-head">
             <span class="lh-title">Lobby Honkin'</span>
             <div class="nudge-row">
+              <button id="voteBtn" class="btn nudge-btn">"Vote!"</button>
               <button id="hollerBtn" class="btn nudge-btn">Holler</button>
             </div>
           </div>

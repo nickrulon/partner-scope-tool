@@ -447,7 +447,8 @@ function doNudge(ws, { kind }) {
   room.nudgeAt = room.nudgeAt || {};
   if (now - (room.nudgeAt[ws.meta.playerId] || 0) < 2000) return;  // 2s cooldown
   room.nudgeAt[ws.meta.playerId] = now;
-  const msg = { kind, text: `${member.name} hollered!` };
+  const text = kind === 'holler1' ? `${member.name} says: VOTE!` : `${member.name} hollered!`;
+  const msg = { kind, text };
   for (const m of room.members.values()) send(m.ws, 'nudge', msg);
   for (const s of room.spectators.values()) send(s.ws, 'nudge', msg);
 }

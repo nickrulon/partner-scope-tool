@@ -82,26 +82,25 @@ $('watchBtn').onclick = () => { playSound('click'); sendWs('spectate', { code: $
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
 $('addBotBtn').onclick = () => { playSound('click'); sendWs('addbot'); };
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
-$('boutaRule').onchange = (e) => sendWs('config', { boutaGooseRule: e.target.checked });
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() { const t = $('chatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('chatInput').value = ''; } }
 
-// ---- lobby: holler nudge + lobby chat ----
-// One "Holler" button cycles through these sound clips, one per press.
-const HOLLER_SOUNDS = ['holler1', 'holler2', 'holler3', 'holler4', 'holler5', 'holler6'];
+// ---- lobby: vote + holler nudges + lobby chat ----
+// "Vote!" always plays holler1 (the "vote" clip); "Holler" cycles the rest.
+const HOLLER_SOUNDS = ['holler2', 'holler3', 'holler4', 'holler5', 'holler6'];
 let hollerIdx = 0;
 let lastNudge = 0;
-function sendHoller() {
+function sendNudge(kind) {
   const now = Date.now();
-  if (now - lastNudge < 2000) return;   // client throttle (server also enforces)
+  if (now - lastNudge < 2000) return false;   // client throttle (server also enforces)
   lastNudge = now;
-  const kind = HOLLER_SOUNDS[hollerIdx % HOLLER_SOUNDS.length];
-  hollerIdx++;
   playSound('click');
-  sendWs('nudge', { kind });            // the holler sound plays when the broadcast returns
+  sendWs('nudge', { kind });            // the nudge sound plays when the broadcast returns
+  return true;
 }
-$('hollerBtn').onclick = sendHoller;
+$('voteBtn').onclick = () => sendNudge('holler1');
+$('hollerBtn').onclick = () => { const k = HOLLER_SOUNDS[hollerIdx % HOLLER_SOUNDS.length]; if (sendNudge(k)) hollerIdx++; };
 $('lobbyChatSend').onclick = sendLobbyChat;
 $('lobbyChatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendLobbyChat(); });
 function sendLobbyChat() { const t = $('lobbyChatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('lobbyChatInput').value = ''; } }
@@ -207,8 +206,6 @@ function renderWaiting() {
   }
 
   $('hostControls').classList.toggle('hidden', !isHost);
-  $('boutaRule').checked = view.boutaGooseRule !== false;
-  $('boutaRule').disabled = !isHost;
   $('startBtn').disabled = !decided;   // enabled only once the vote is unanimous
 
   // Vote tally (members only — spectator votes don't count toward unanimity).
