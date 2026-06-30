@@ -54,12 +54,6 @@
         <div id="voteStatus" class="vote-status"></div>
         <div id="voteList" class="vote-list"></div>
 
-        <!-- nudge buttons -->
-        <div id="nudgeRow" class="nudge-row">
-          <button id="nudgeVote" class="btn nudge-btn">Vote!</button>
-          <button id="nudgeUnanimous" class="btn nudge-btn">Unanimous!</button>
-        </div>
-
         <div id="hostControls" class="host-controls hidden">
           <button id="addBotBtn" class="btn block">+ Add a Computer Goose</button>
           <label class="check"><input type="checkbox" id="boutaRule" checked />
@@ -71,7 +65,13 @@
 
         <!-- lobby chat -->
         <div class="lobby-honk">
-          <div class="lh-head">Lobby Honkin'</div>
+          <div class="lh-head">
+            <span class="lh-title">Lobby Honkin'</span>
+            <div class="nudge-row">
+              <button id="nudgeVote" class="btn nudge-btn">"Vote!"</button>
+              <button id="nudgeUnanimous" class="btn nudge-btn">"Unanimous!"</button>
+            </div>
+          </div>
           <div id="lobbyChat" class="lh-msgs"></div>
           <div class="row lh-row">
             <input id="lobbyChatInput" maxlength="200" placeholder="talk some smack, holler in the chat…" />
