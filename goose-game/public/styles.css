@@ -525,10 +525,12 @@ input::placeholder { color: #9a8d6e; }
     box-shadow: 0 -8px 24px rgba(0,0,0,.5);
   }
   /* Honk Chat above the Activity Log; Sounds then Leave at the bottom. */
-  .rail-right .chat-panel  { order: 1; }
-  .rail-right .log-panel   { order: 2; }
-  .rail-right .sound-panel { order: 3; }
-  .rail-right .leave-btn { order: 4; position: static; width: 100%; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
+  /* Prioritize Honk Chat: tall and never squished; Activity Log is thinner and
+     scrolls inside its own box. */
+  .rail-right .chat-panel  { order: 1; flex: 0 0 auto; height: clamp(220px, 40vh, 360px); }
+  .rail-right .log-panel   { order: 2; flex: 0 0 auto; height: clamp(120px, 20vh, 170px); }
+  .rail-right .sound-panel { order: 3; flex: 0 0 auto; }
+  .rail-right .leave-btn { order: 4; flex: 0 0 auto; position: static; width: 100%; box-shadow: 0 3px 0 rgba(0,0,0,.3); }
 
   /* WIN overlay on mobile: scroll top-to-bottom (nothing clipped), small
      trophy, single scrollable row of winning cards, buttons pinned to bottom. */
