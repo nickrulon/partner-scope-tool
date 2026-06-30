@@ -21,11 +21,16 @@ Supported extensions (first one found wins): **mp3, ogg, wav, m4a**.
 | `goosednoannounce` | a player hits 21 **without** announcing "I'm bout to goose" and gets goosed |
 | `win`       | someone wins |
 | `lose`      | you lose (the winner was someone else) |
-| `vote`      | a player taps the lobby "Vote!" nudge |
-| `unanimous` | a player taps the lobby "Unanimous!" nudge |
+| `holler1` … `holler6` | the lobby "Holler" button cycles through these, one per press |
 
-Examples: `sounds/bigboy.mp3`, `sounds/honk.wav`. The `vote`/`unanimous`
-nudge sounds are optional — missing files just stay silent.
+The lobby **Holler** button rotates through `holler1` → `holler6` (then back to
+`holler1`). Suggested contents, in order:
+`holler1` = "vote", `holler2` = "unanimous (long)",
+`holler3` = "y'all got to get on the same page", `holler4` = "unanimous (short)",
+`holler5` = "come on, y'all", `holler6` = "come on now, here".
+
+Examples: `sounds/bigboy.mp3`, `sounds/holler1.m4a`. The holler sounds are
+optional — missing files just stay silent.
 
 - Files are **optional** — anything missing is simply silent, so the game runs
   fine with no audio at all.

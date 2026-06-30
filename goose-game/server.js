@@ -436,20 +436,18 @@ function doKick(ws, { targetId }) {
 
 // Lobby nudge: a public "honk" reminding everyone to vote / agree. Throttled
 // per player so it can be playful without spamming the room.
+const HOLLER_KINDS = new Set(['holler1', 'holler2', 'holler3', 'holler4', 'holler5', 'holler6']);
 function doNudge(ws, { kind }) {
   const room = getRoom(ws.meta.roomCode);
   if (!room || room.game) return;                 // lobby only
-  const k = kind === 'unanimous' ? 'unanimous' : 'vote';
+  if (!HOLLER_KINDS.has(kind)) return;
   const member = room.members.get(ws.meta.playerId) || room.spectators.get(ws.meta.playerId);
   if (!member) return;
   const now = Date.now();
   room.nudgeAt = room.nudgeAt || {};
   if (now - (room.nudgeAt[ws.meta.playerId] || 0) < 2000) return;  // 2s cooldown
   room.nudgeAt[ws.meta.playerId] = now;
-  const text = k === 'unanimous'
-    ? `${member.name} says: it's gotta be unanimous!`
-    : `${member.name} says: vote for the silliest goose!`;
-  const msg = { kind: k, text };
+  const msg = { kind, text: `${member.name} hollered!` };
   for (const m of room.members.values()) send(m.ws, 'nudge', msg);
   for (const s of room.spectators.values()) send(s.ws, 'nudge', msg);
 }

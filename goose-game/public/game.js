@@ -87,17 +87,21 @@ $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() { const t = $('chatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('chatInput').value = ''; } }
 
-// ---- lobby: nudges + lobby chat ----
+// ---- lobby: holler nudge + lobby chat ----
+// One "Holler" button cycles through these sound clips, one per press.
+const HOLLER_SOUNDS = ['holler1', 'holler2', 'holler3', 'holler4', 'holler5', 'holler6'];
+let hollerIdx = 0;
 let lastNudge = 0;
-function sendNudge(kind) {
+function sendHoller() {
   const now = Date.now();
-  if (now - lastNudge < 2000) return;   // client-side throttle (server also enforces)
+  if (now - lastNudge < 2000) return;   // client throttle (server also enforces)
   lastNudge = now;
+  const kind = HOLLER_SOUNDS[hollerIdx % HOLLER_SOUNDS.length];
+  hollerIdx++;
   playSound('click');
-  sendWs('nudge', { kind });
+  sendWs('nudge', { kind });            // the holler sound plays when the broadcast returns
 }
-$('nudgeVote').onclick = () => sendNudge('vote');
-$('nudgeUnanimous').onclick = () => sendNudge('unanimous');
+$('hollerBtn').onclick = sendHoller;
 $('lobbyChatSend').onclick = sendLobbyChat;
 $('lobbyChatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendLobbyChat(); });
 function sendLobbyChat() { const t = $('lobbyChatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('lobbyChatInput').value = ''; } }
