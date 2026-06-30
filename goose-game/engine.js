@@ -8,13 +8,17 @@ let _id = 0;
 const newId = () => `c${++_id}`;
 
 // Every goose can be named — regular geese AND wild geese (not Big Boy, the
-// villain). The number of names a card holds equals its point value:
-// Goose/Ungoosable/etc 1, Geese/Great Honkeror 2, Geeses 4.
+// villain). Name slots = point value (Goose 1, Geese 2, Geeses 4), EXCEPT the
+// Great Honkeror, who is one goose worth 2 points but only gets one name.
 const NAMEABLE = new Set([
   'GOOSE', 'GEESE', 'GEESES',
   'UNGOOSABLE', 'GOOSE_GANG', 'GET_GOOSED', 'LAWN_MOWER', 'GREAT_HONKEROR',
 ]);
-const nameSlots = (kind) => (NAMEABLE.has(kind) ? points(kind) : 0);
+const nameSlots = (kind) => {
+  if (!NAMEABLE.has(kind)) return 0;
+  if (kind === 'GREAT_HONKEROR') return 1;   // one goose, one name (still worth 2 pts)
+  return points(kind);
+};
 
 // Mulberry32 — small seedable RNG so tests are deterministic.
 export function makeRng(seed = Date.now() >>> 0) {
@@ -71,7 +75,7 @@ function applyCarriedNames(decks, carry) {
   for (const entry of carry) {
     if (!entry || !NAMEABLE.has(entry.kind) || !Array.isArray(entry.names) || !entry.names.length) continue;
     const card = all.find((c) => c.kind === entry.kind && !c.names);
-    if (card) card.names = entry.names.slice(0, points(entry.kind));
+    if (card) card.names = entry.names.slice(0, nameSlots(entry.kind));
   }
 }
 
@@ -297,11 +301,17 @@ export function applyAction(state, playerId, action) {
     return respond(state, action);
   }
 
+  // Post-draw announce decision: only the active player, before their turn ends.
+  if (state.phase === 'AWAIT_ANNOUNCE') {
+    if (type !== 'ANNOUNCE_DECISION') return err(state, 'Decide whether to announce first.');
+    if (playerId !== state.pending.target) return err(state, 'Not your call.');
+    return announceDecision(state, action);
+  }
+
   // PRE_DRAW phase: only the active player may act.
   if (playerId !== activePlayer(state).id) return err(state, "It's not your turn.");
 
   switch (type) {
-    case 'ANNOUNCE_GOOSE': return announce(state);
     case 'TRADE':          return trade(state, action);
     case 'PLAY_LAWN_MOWER':return lawnMower(state, action);
     case 'DRAW':           return draw(state);
@@ -328,13 +338,18 @@ function nameGoose(state, playerId, action) {
   return { state };
 }
 
-function announce(state) {
+// The active player's end-of-turn choice (after drawing into 17+): call it, or
+// stay quiet. Either way the turn then ends.
+function announceDecision(state, action) {
   const p = activePlayer(state);
-  if (score(p) < ANNOUNCE_AT) return err(state, `Premature! Announce at ${ANNOUNCE_AT}+ (lol learn to count).`);
-  if (p.announcedBoutaGoose) return err(state, 'Already announced.');
-  p.announcedBoutaGoose = true;
-  logMsg(state, `${p.name} announced: "I'M BOUTA GOOSE!"`, 'good');
-  emitFx(state, 'ANNOUNCE', { actor: p.name });
+  if (action.announce) {
+    p.announcedBoutaGoose = true;
+    logMsg(state, `${p.name} announced: "I'M BOUTA GOOSE!"`, 'good');
+    emitFx(state, 'ANNOUNCE', { actor: p.name });
+  } else {
+    logMsg(state, 'You kept quiet — stayin\' sneaky.', 'info', p.id);
+  }
+  endTurn(state);
   return { state };
 }
 
@@ -402,6 +417,16 @@ function draw(state) {
   // Public, card-less — lets opponents animate a facedown mystery draw.
   emitFx(state, 'DRAW_HIDDEN', { actor: p.name, actorId: p.id });
   if (checkWin(state, p)) return { state };
+  // Reached the announce threshold this turn (but didn't win) and haven't
+  // called it yet → decide NOW, before the turn passes. This is why you can't
+  // announce-then-win on the same turn: you announce at the END of a turn, then
+  // can win on a later one (giving everyone a chance to react in between).
+  if (state.options.boutaGooseRule && score(p) >= ANNOUNCE_AT && !p.announcedBoutaGoose) {
+    state.pending = { type: 'ANNOUNCE_CHOICE', target: p.id };
+    state.phase = 'AWAIT_ANNOUNCE';
+    logMsg(state, `You're at ${score(p)} — announce you're bouta goose?`, 'info', p.id);
+    return { state };
+  }
   endTurn(state);
   return { state };
 }
@@ -467,10 +492,14 @@ function finishThreat(state) {
 // Hide opponents' hands; reveal only counts + score.
 
 export function redact(state, viewerId) {
+  // The announce decision is private to the deciding player — to everyone else
+  // it just looks like that player's normal turn (so it doesn't leak that they
+  // crossed 17).
+  const hideAnnounce = state.phase === 'AWAIT_ANNOUNCE' && state.pending?.target !== viewerId;
   return {
-    phase: state.phase,
+    phase: hideAnnounce ? 'PRE_DRAW' : state.phase,
     turnPlayerId: state.players[state.turnIndex]?.id ?? null,
-    pending: state.pending
+    pending: (state.pending && !hideAnnounce)
       ? { type: state.pending.type, targetId: state.pending.target }
       : null,
     winnerId: state.winnerId,

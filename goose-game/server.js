@@ -362,9 +362,12 @@ function runBotMove(room, actorId) {
   const g = room.game;
   if (!g || g.phase === 'GAME_OVER') return;
   const responding = g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED';
-  const expected = responding ? g.pending?.target : g.players[g.turnIndex]?.id;
+  const expected = (responding || g.phase === 'AWAIT_ANNOUNCE') ? g.pending?.target : g.players[g.turnIndex]?.id;
   if (expected !== actorId) return; // state moved on; bail
-  const action = responding ? botResponse(g, actorId) : botTurn(g, actorId);
+  let action;
+  if (g.phase === 'AWAIT_ANNOUNCE') action = { type: 'ANNOUNCE_DECISION', announce: true }; // bots always call it
+  else if (responding) action = botResponse(g, actorId);
+  else action = botTurn(g, actorId);
   const { state } = applyAction(g, actorId, action);
   room.game = state;
   if (state.winnerId) { room.lastWinnerId = state.winnerId; room.carryNames = collectNames(state); }
@@ -374,10 +377,7 @@ function runBotMove(room, actorId) {
 
 function botTurn(g, botId) {
   const p = g.players.find((x) => x.id === botId);
-  // Must announce before a winning draw is allowed (when the rule is on).
-  if (g.options.boutaGooseRule && score(p) >= ANNOUNCE_AT && !p.announcedBoutaGoose) {
-    return { type: 'ANNOUNCE_GOOSE' };
-  }
+  // (Announcing now happens after the draw, via the AWAIT_ANNOUNCE prompt.)
   // Mow down whoever has the biggest gaggle, if it's worth it.
   if (p.wild.some((w) => w.kind === 'LAWN_MOWER')) {
     const victim = g.players

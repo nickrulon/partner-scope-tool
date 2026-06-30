@@ -119,23 +119,58 @@ console.log('\n== Win requires announcing at 17 when rule is on ==');
   eq(g.players[0].regular.length, 0, 'penalty wiped the regular hand');
 }
 
-console.log('\n== Win succeeds after announcing ==');
+console.log('\n== Win succeeds when already announced (from a prior turn) ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 10, boutaGooseRule: true });
   g.players[0].regular = Array.from({ length: 5 }, (_, i) => ({ id: `g${i}`, kind: 'GEESES' })); // 20
-  applyAction(g, 'A', { type: 'ANNOUNCE_GOOSE' });
+  g.players[0].announcedBoutaGoose = true;   // announced on an earlier turn
   stackGoose(g, ['GOOSE']);
   applyAction(g, 'A', { type: 'DRAW' });
-  eq(g.winnerId, 'A', 'A wins after announcing');
+  eq(g.winnerId, 'A', 'A wins — drew to 21 having already announced');
   eq(g.phase, 'GAME_OVER', 'game over');
 }
 
-console.log('\n== Announcing revokes if score drops below 17 ==');
+console.log('\n== Post-draw announce prompt at 17+, then decision ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 51, boutaGooseRule: true });
+  g.players[0].regular = Array.from({ length: 15 }, (_, i) => ({ id: `g${i}`, kind: 'GOOSE' })); // 15
+  stackGoose(g, ['GEESE']); // +2 → 17
+  applyAction(g, 'A', { type: 'DRAW' });
+  eq(g.phase, 'AWAIT_ANNOUNCE', 'reaching 17 on a draw prompts the announce decision');
+  eq(g.players[g.turnIndex].id, 'A', 'still A — turn has not passed yet');
+  ok(!g.players[0].announcedBoutaGoose, 'not announced until they decide');
+  // B can't see the announce phase (no leak that A crossed 17)
+  eq(redact(g, 'B').phase, 'PRE_DRAW', 'opponents just see a normal turn');
+  applyAction(g, 'A', { type: 'ANNOUNCE_DECISION', announce: true });
+  ok(g.players[0].announcedBoutaGoose, 'A announced via the decision');
+  eq(g.players[g.turnIndex].id, 'B', 'turn passed after the decision');
+}
+
+console.log('\n== Declining the announce keeps you quiet ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 52, boutaGooseRule: true });
+  g.players[0].regular = Array.from({ length: 15 }, (_, i) => ({ id: `g${i}`, kind: 'GOOSE' })); // 15
+  stackGoose(g, ['GEESE']); // +2 → 17
+  applyAction(g, 'A', { type: 'DRAW' });
+  applyAction(g, 'A', { type: 'ANNOUNCE_DECISION', announce: false });
+  ok(!g.players[0].announcedBoutaGoose, 'stayed quiet');
+  eq(g.players[g.turnIndex].id, 'B', 'turn still passed');
+}
+
+console.log('\n== You cannot announce before drawing anymore ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 53, boutaGooseRule: true });
+  g.players[0].regular = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, kind: 'GEESE' })); // 18
+  const r = applyAction(g, 'A', { type: 'ANNOUNCE_GOOSE' });
+  ok(!!r.error, 'pre-draw ANNOUNCE_GOOSE is rejected');
+  ok(!g.players[0].announcedBoutaGoose, 'no early announce');
+}
+
+console.log('\n== Announcement revokes if score drops below 17 ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 14, boutaGooseRule: true });
   g.players[0].regular = Array.from({ length: 9 }, (_, i) => ({ id: `g${i}`, kind: 'GEESE' })); // 18
-  applyAction(g, 'A', { type: 'ANNOUNCE_GOOSE' });
-  ok(g.players[0].announcedBoutaGoose, 'A announced at 18');
+  g.players[0].announcedBoutaGoose = true;   // announced earlier
   stackGoose(g, ['BIG_BOY']);
   applyAction(g, 'A', { type: 'DRAW' });
   applyAction(g, 'A', { type: 'RESPOND', response: 'absorb' });
@@ -298,7 +333,7 @@ console.log('\n== Winner hand is revealed to everyone at game over ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 35, boutaGooseRule: true });
   g.players[0].regular = Array.from({ length: 5 }, (_, i) => ({ id: `g${i}`, kind: 'GEESES' })); // 20
-  applyAction(g, 'A', { type: 'ANNOUNCE_GOOSE' });
+  g.players[0].announcedBoutaGoose = true;   // announced on an earlier turn
   stackGoose(g, ['GOOSE']);
   applyAction(g, 'A', { type: 'DRAW' });   // A hits 21 and wins
   const bView = redact(g, 'B').players.find((x) => x.id === 'A');

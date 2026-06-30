@@ -29,7 +29,7 @@ const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' }
 // wild geese are nameable; Big Boy is not.
 const NAME_MAX = {
   GOOSE: 1, GEESE: 2, GEESES: 4,
-  UNGOOSABLE: 1, GOOSE_GANG: 1, GET_GOOSED: 1, LAWN_MOWER: 1, GREAT_HONKEROR: 2,
+  UNGOOSABLE: 1, GOOSE_GANG: 1, GET_GOOSED: 1, LAWN_MOWER: 1, GREAT_HONKEROR: 1,
 };
 // Playful suggestions shown as placeholders when naming a goose (one per name
 // slot — a Geeses shows all four).
@@ -477,9 +477,8 @@ function renderControls() {
     return;
   }
 
-  if (p.score >= 17 && !p.announcedBoutaGoose) {
-    c.appendChild(btn('Announce: I’m bouta goose!', 'btn-primary', () => sendWs('action', { action: { type: 'ANNOUNCE_GOOSE' } })));
-  }
+  // (Announcing "I'm bouta goose" now happens via a prompt AFTER you draw into
+  // 17+, not as a pre-draw action — see the AWAIT_ANNOUNCE overlay.)
   const tradeBtn = btn('Trade in Wild Goose Market', '', () => { tradeMode = true; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); });
   tradeBtn.disabled = g.wildDrawCount === 0 || p.regular.length === 0;
   c.appendChild(tradeBtn);
@@ -600,6 +599,20 @@ function renderOverlay() {
   $('winHand').innerHTML = '';
   winDismissed = false;
   ov.classList.remove('win');
+
+  // Post-draw announce prompt (only the deciding player ever sees this phase).
+  if (g.phase === 'AWAIT_ANNOUNCE') {
+    goosedChoosing = false;
+    ov.classList.remove('hidden');
+    honk.textContent = '';
+    card.style.display = 'none';
+    banner.textContent = 'BOUTA GOOSE?';
+    sub.textContent = `You're at ${me()?.score ?? ''}. Reach 21 without callin' it and you get GOOSED — lose all yer geese. Call it now, or stay sneaky a lil' longer.`;
+    cc.innerHTML = '';
+    cc.appendChild(btn("I'm bouta goose!", 'btn-primary', () => sendWs('action', { action: { type: 'ANNOUNCE_DECISION', announce: true } })));
+    cc.appendChild(btn('Stay quiet', 'btn-ghost', () => sendWs('action', { action: { type: 'ANNOUNCE_DECISION', announce: false } })));
+    return;
+  }
 
   const active = g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED';
   ov.classList.toggle('hidden', !active);
@@ -810,7 +823,7 @@ function lastMove() {
 function renderPlayArea() {
   if (laneBusy) return;
   const g = view.game, pa = $('playArea');
-  if (g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED') { pa.innerHTML = ''; return; }
+  if (g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED' || g.phase === 'AWAIT_ANNOUNCE') { pa.innerHTML = ''; return; }
   if (tradeMode && isMyTurn() && g.phase === 'PRE_DRAW') { renderTradeStage(pa); return; }
   let main, mine = false;
   if (g.phase === 'GAME_OVER') { const w = g.players.find((x) => x.id === g.winnerId); main = w ? `${w.name} wins` : 'Game over'; }
