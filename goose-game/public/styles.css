@@ -527,4 +527,6 @@ input::placeholder { color: #9a8d6e; }
   /* Big Boy / threat overlay on mobile: stay centered with a big card (same
      size as a drawn card), not shrunk to a corner or pushed to the bottom. */
   .overlay:not(.win) .overlay-card { width: min(64vw, 300px); }
+  /* drawn-card label + buttons sit lower so they clear the card image */
+  .draw-caption { bottom: 8%; }
 }

@@ -854,8 +854,11 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
   const centerX = reveal ? window.innerWidth / 2 : (play ? play.getBoundingClientRect().left + play.getBoundingClientRect().width / 2 : window.innerWidth / 2);
   const centerY = reveal ? window.innerHeight / 2 : (play ? play.getBoundingClientRect().top + play.getBoundingClientRect().height / 2 : window.innerHeight / 2);
   const cdx = centerX - startCx, cdy = centerY - startCy;
+  // Slightly smaller reveal card on phones so the card-type label + buttons
+  // below it don't overlap the image.
+  const revealFactor = window.innerWidth <= 1040 ? 0.34 : 0.4;
   const bigScale = reveal
-    ? Math.max(1.8, Math.min(4.5, (window.innerHeight * 0.4) / h))
+    ? Math.max(1.6, Math.min(4.5, (window.innerHeight * revealFactor) / h))
     : Math.max(1.4, Math.min(3, ((play?.getBoundingClientRect().height || 200) * 0.4) / h));
 
   let backdrop = null;
