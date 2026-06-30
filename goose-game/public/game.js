@@ -690,7 +690,7 @@ function renderOverlay() {
     honk.textContent = '';
     card.style.display = 'none';
     banner.textContent = 'BOUTA GOOSE?';
-    sub.textContent = `You're at ${me()?.score ?? ''}. Reach 21 without callin' it and you get GOOSED — lose all yer geese. Call it now, or stay sneaky a lil' longer.`;
+    sub.textContent = `Yer gaggle's at ${me()?.score ?? ''}. Reach 21 without announcin' and you lose all yer geese. Call it now, or fly under the radar?`;
     cc.innerHTML = '';
     cc.appendChild(btn("I'm bouta goose!", 'btn-primary', () => sendWs('action', { action: { type: 'ANNOUNCE_DECISION', announce: true } })));
     cc.appendChild(btn('Stay quiet', 'btn-ghost', () => sendWs('action', { action: { type: 'ANNOUNCE_DECISION', announce: false } })));
