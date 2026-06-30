@@ -164,7 +164,7 @@ function joinRoom(ws, room, playerId, name) {
 // Honk-pun names — used for computer geese AND for any human who joins without
 // typing a name (so nobody is just "Goose"). Picks the first one not in use.
 const GOOSE_NAMES = [
-  'Goosepunz', 'Sir Quacks-a-lot', 'Honkleberry', 'Featherbottom', 'Lord Wingsworth',
+  'Sir Quacks-a-lot', 'Honkleberry', 'Featherbottom', 'Lord Wingsworth',
   'Gooseifer', 'Beaky McBeakface', 'Old Man Honk', 'Captain Waddles', 'Quackary',
   'Sir Hiss-a-lot', 'Gandalf the Grey Goose', 'Duchess Featherton', 'Honk Williams Jr.',
   'Duck Norris', 'Nibbles',
