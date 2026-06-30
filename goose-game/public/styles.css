@@ -302,19 +302,22 @@ input::placeholder { color: #9a8d6e; }
 }
 
 /* ---------- right rail panels ---------- */
-.rail-right { display: grid; grid-template-rows: 1fr auto auto; gap: 12px; }
-.panel { display: flex; flex-direction: column; min-height: 0; padding: 10px; }
+/* minmax(0,…) + scrollable panels so the three boxes always fit the column
+   height (and scroll internally) instead of clipping off the bottom. */
+.rail-right { display: grid; grid-template-rows: minmax(80px, 1fr) auto auto; gap: 12px; min-height: 0; overflow: hidden; }
+.panel { display: flex; flex-direction: column; min-height: 0; padding: 10px; overflow: hidden; }
 .panel-head { font-weight: bold; text-transform: uppercase; letter-spacing: .08em; font-size: .8rem; border-bottom: 2px solid var(--paper-edge); padding-bottom: 6px; margin-bottom: 8px; color: var(--ink); }
-.log { flex: 1; overflow-y: auto; font-family: var(--term); font-size: 1.05rem; line-height: 1.15; min-height: 120px; }
+.log { flex: 1; overflow-y: auto; font-family: var(--term); font-size: 1.05rem; line-height: 1.15; min-height: 0; }
 .log div { padding: 3px 0; border-bottom: 1px solid rgba(0,0,0,.08); color: var(--ink-soft); }
 .log .bad { color: var(--bad); }
 .log .good { color: var(--good); }
 .log .win { color: var(--bill-dark); font-weight: bold; }
-.chat-panel { height: 180px; }
+.chat-panel { height: clamp(130px, 22vh, 180px); }
 .chat { flex: 1; overflow-y: auto; font-size: .85rem; }
 .chat div { padding: 2px 0; }
 .chat .c-from { color: var(--bill-dark); font-weight: bold; }
-.chat-row input { flex: 1; }
+.chat-row { min-width: 0; }
+.chat-row input { flex: 1; min-width: 0; }  /* min-width:0 lets the input shrink so the Honk button never clips */
 .sound-panel { gap: 8px; }
 .slider-field { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--ink-soft); }
 .slider-field input[type=range] { flex: 1; accent-color: var(--bill); }

@@ -158,6 +158,20 @@ function joinRoom(ws, room, playerId, name) {
   else { broadcast(room); if (room.game) maybeRunBot(room); }
 }
 
+// Honk-pun names — used for computer geese AND for any human who joins without
+// typing a name (so nobody is just "Goose"). Picks the first one not in use.
+const GOOSE_NAMES = [
+  'Goosepunz', 'Sir Quacks-a-lot', 'Honkleberry', 'Featherbottom', 'Lord Wingsworth',
+  'Gooseifer', 'Beaky McBeakface', 'Old Man Honk', 'Captain Waddles', 'Quackary',
+  'Sir Hiss-a-lot', 'Gandalf the Grey Goose', 'Duchess Featherton', 'Honk Williams Jr.',
+  'Duck Norris', 'Nibbles',
+];
+function pickGooseName(room) {
+  const used = new Set([...room.members.values()].map((m) => m.name));
+  return GOOSE_NAMES.find((n) => !used.has(n)) || `Goose ${room.members.size + 1}`;
+}
+const cleanName = (name, room) => (name && name.trim() ? name.trim().slice(0, 20) : pickGooseName(room));
+
 function doCreate(ws, { name, playerId }) {
   const code = makeCode();
   const pid = playerId || `p${Math.random().toString(36).slice(2, 9)}`;
@@ -167,7 +181,7 @@ function doCreate(ws, { name, playerId }) {
     botTimer: null, startTimer: null, spectators: new Map(),
   };
   rooms.set(code, room);
-  joinRoom(ws, room, pid, (name || 'Goose').slice(0, 20));
+  joinRoom(ws, room, pid, cleanName(name, room));
 }
 
 function doJoin(ws, { code, name, playerId }) {
@@ -178,7 +192,7 @@ function doJoin(ws, { code, name, playerId }) {
   if (room.game && !existing && !room.game.players.find((p) => p.id === pid)) {
     return send(ws, 'error', { message: 'Game already started — ask for a rematch to join.' });
   }
-  joinRoom(ws, room, pid, (name || existing?.name || 'Goose').slice(0, 20));
+  joinRoom(ws, room, pid, (name && name.trim()) ? name.trim().slice(0, 20) : (existing?.name || pickGooseName(room)));
 }
 
 // --- Silliest-goose vote ------------------------------------------------
@@ -216,18 +230,12 @@ function doVote(ws, { candidateId }) {
   afterVoteChange(room);
 }
 
-const BOT_NAMES = [
-  'Sir Quacks-a-lot', 'Honkleberry', 'Featherbottom', 'Lord Wingsworth',
-  'Gooseifer', 'Beaky McBeakface', 'Old Man Honk', 'Captain Waddles',
-  'Sir Hiss-a-lot', 'Gandalf the Grey Goose', 'Duchess Featherton', 'Nibbles',
-];
 function doAddBot(ws) {
   const room = getRoom(ws.meta.roomCode);
   if (!room || room.game) return;
   if (ws.meta.playerId !== room.hostId) return send(ws, 'error', { message: 'Only the host can add computers.' });
   if (room.members.size >= 8) return send(ws, 'error', { message: 'The pond is full (8 geese max).' });
-  const used = new Set([...room.members.values()].map((m) => m.name));
-  const name = BOT_NAMES.find((n) => !used.has(n)) || `Goose-Bot ${room.members.size}`;
+  const name = pickGooseName(room);
   const pid = `bot_${Math.random().toString(36).slice(2, 9)}`;
   room.members.set(pid, { playerId: pid, name, ws: null, isBot: true });
   afterVoteChange(room);

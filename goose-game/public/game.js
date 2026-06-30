@@ -26,6 +26,12 @@ let laneTimer = null;
 const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' };
 // How many names each goose card can hold (matches its point value).
 const NAME_MAX = { GOOSE: 1, GEESE: 2, GEESES: 4 };
+// Playful suggestions shown as placeholders when naming a goose.
+const GOOSE_PUNS = [
+  'Honk Williams Jr.', 'Quackary', 'Sir Honks-a-lot', 'Gandalf the Greywing',
+  'Beyoncé Quackles', 'Honkleberry Finn', 'Duck Norris', 'Maya Anhonku',
+  'Quackie Chan', 'Vincent van Honk', 'Goosifer', 'Feathers McGraw',
+];
 
 // ---- art probing (resolves real extension; sizes as cover) ----
 const artStatus = {}, artUrl = {};
@@ -313,7 +319,9 @@ function renderMine() {
     slot.appendChild(cap);
     reg.appendChild(slot);
   });
-  const total = (p.regular || []).reduce((s, c) => s + (cardMeta[c.kind]?.points || 0), 0);
+  // Total points = regular geese + wild geese (matches your score on the panel).
+  const total = [...(p.regular || []), ...(p.wild || [])]
+    .reduce((s, c) => s + (cardMeta[c.kind]?.points || 0), 0);
   const n = p.regular ? p.regular.length : 0;
   $('handHint').textContent = `${n} goose card${n === 1 ? '' : 's'} · ${total} pts`;
 }
@@ -395,7 +403,7 @@ function openNameModal(cardId, onClose) {
     const inp = document.createElement('input');
     inp.className = 'nm-input';
     inp.maxLength = 24;
-    inp.placeholder = max === 1 ? 'e.g. Gerald' : `Name ${i + 1}`;
+    inp.placeholder = `e.g. ${GOOSE_PUNS[i % GOOSE_PUNS.length]}`;
     inp.value = existing[i] || '';
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
     inputs.push(inp);
