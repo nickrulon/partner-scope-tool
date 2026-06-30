@@ -192,8 +192,22 @@ function doJoin(ws, { code, name, playerId }) {
   if (!room) return send(ws, 'error', { message: 'No room with that code.' });
   const pid = playerId || `p${Math.random().toString(36).slice(2, 9)}`;
   const existing = room.members.get(pid);
-  if (room.game && !existing && !room.game.players.find((p) => p.id === pid)) {
-    return send(ws, 'error', { message: 'Game already started — ask for a rematch to join.' });
+  const knownById = !!existing || (room.game && room.game.players.some((p) => p.id === pid));
+  if (room.game && !knownById) {
+    // Reconnecting from a new device / cleared storage: reclaim your seat by
+    // matching the exact name you were playing under.
+    const want = (name || '').trim().toLowerCase();
+    const seat = want && room.game.players.find((p) => !p.removed && p.name.toLowerCase() === want);
+    if (seat) {
+      ws.meta = { roomCode: room.code, playerId: seat.id };   // adopt the existing seat id
+      room.members.set(seat.id, { playerId: seat.id, name: seat.name, ws });
+      seat.connected = true;
+      send(ws, 'joined', { code: room.code, playerId: seat.id, hostId: room.hostId });
+      broadcast(room);
+      maybeRunBot(room);
+      return;
+    }
+    return send(ws, 'error', { message: 'Game in progress — rejoin with the exact name you used, or wait for a rematch.' });
   }
   joinRoom(ws, room, pid, (name && name.trim()) ? name.trim().slice(0, 20) : (existing?.name || pickGooseName(room)));
 }

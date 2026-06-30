@@ -54,16 +54,48 @@ function probeArt(kind) {
 }
 const hasArt = (k) => artStatus[k] === 'ok';
 
+// ---- reconnect memory ----
+// Remember the room + name + mode so a refresh, wifi blip, or a fresh device
+// drops you straight back into your seat instead of the lobby.
+const ROOM_KEY = 'goose_room', NAME_KEY = 'goose_name', MODE_KEY = 'goose_mode';
+function rememberSession() {
+  if (!view || !view.code) return;
+  localStorage.setItem(ROOM_KEY, view.code);
+  localStorage.setItem(MODE_KEY, spectating ? 'watch' : 'play');
+  const myName = view.game
+    ? view.game.players.find((p) => p.id === playerId)?.name
+    : (view.members || []).find((m) => m.id === playerId)?.name;
+  if (myName) localStorage.setItem(NAME_KEY, myName);
+}
+function autoRejoin() {
+  const code = localStorage.getItem(ROOM_KEY);
+  if (!code) return;
+  const name = localStorage.getItem(NAME_KEY) || '';
+  if (localStorage.getItem(MODE_KEY) === 'watch') sendWs('spectate', { code, name: name || 'Spectator', playerId: spectatorId });
+  else sendWs('join', { code, name, playerId });   // server slots you back by id, or by exact name
+}
+
 // ---- connection ----
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => autoRejoin();   // on first load AND every reconnect
   ws.onmessage = (ev) => {
     const { type, payload } = JSON.parse(ev.data);
     if (type === 'cardMeta') { cardMeta = payload; Object.keys(cardMeta).forEach(probeArt); Object.values(PILE_BACKS).forEach(probeArt); }
-    else if (type === 'joined') { view = view || {}; view.hostId = payload.hostId; }
+    else if (type === 'joined') {
+      view = view || {}; view.hostId = payload.hostId;
+      // Adopt the seat id the server gives us (matters when reclaiming a seat
+      // by name from a new device); spectators keep their own id.
+      if (payload.playerId && !payload.spectator) { playerId = payload.playerId; localStorage.setItem(PID_KEY, playerId); }
+      if (payload.code) localStorage.setItem(ROOM_KEY, payload.code);
+      localStorage.setItem(MODE_KEY, payload.spectator ? 'watch' : 'play');
+    }
     else if (type === 'state') { view = payload; render(); }
-    else if (type === 'error') { toast(payload.message); $('lobbyErr').textContent = payload.message; }
+    else if (type === 'error') {
+      toast(payload.message); $('lobbyErr').textContent = payload.message;
+      if (/no room with that code/i.test(payload.message)) localStorage.removeItem(ROOM_KEY); // stale room — don't keep retrying
+    }
     else if (type === 'chat') { addChat(payload.from, payload.text); if (payload.from) playSound('honk'); }
     else if (type === 'nudge') { nudgeBanner(payload.text); playSound(payload.kind); }
   };
@@ -132,6 +164,7 @@ function render() {
   if (!view) return;
   spectating = !!view.spectator;
   document.body.classList.toggle('spectating', spectating);
+  rememberSession();
   if (!view.code) { resetTransient(); showScreen('lobby'); return; }
   if (!view.game) { resetTransient(); renderWaiting(); showScreen('waiting'); return; }
   renderGame();
