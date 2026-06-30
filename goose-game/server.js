@@ -340,7 +340,7 @@ function maybeRunBot(room) {
     : g.players[g.turnIndex]?.id;
   const m = actorId && room.members.get(actorId);
   if (!m || !m.isBot) return;
-  room.botTimer = setTimeout(() => runBotMove(room, actorId), 1200);
+  room.botTimer = setTimeout(() => runBotMove(room, actorId), 3000); // give humans ~3s to follow the computer's move
 }
 
 function runBotMove(room, actorId) {

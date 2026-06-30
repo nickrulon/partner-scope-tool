@@ -200,7 +200,7 @@ console.log('\n== Trade emits a private Wild reveal to the trader only ==');
   ok(bPub, 'B still sees the public TRADE announcement');
 }
 
-console.log('\n== Naming geese: caps by point value, only goose cards ==');
+console.log('\n== Naming geese: caps by point value; regular AND wild nameable ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 21 });
   g.players[0].regular = [{ id: 'g1', kind: 'GEESE' }];          // 2 names allowed
@@ -209,8 +209,9 @@ console.log('\n== Naming geese: caps by point value, only goose cards ==');
   const r1 = applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: 'g1', names: ['Gerald', 'Gandalf', 'Extra'] });
   ok(!r1.error, 'naming a Geese accepted');
   eq(g.players[0].regular[0].names.length, 2, 'Geese capped at 2 names');
-  const r2 = applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: wildId, names: ['Nope'] });
-  ok(!!r2.error, 'cannot name a wild card');
+  const r2 = applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: wildId, names: ['Quackary', 'Two'] });
+  ok(!r2.error, 'naming a wild goose (Ungoosable) is now accepted');
+  eq(g.players[0].wild[0].names.length, 1, 'Ungoosable capped at 1 name (its point value)');
   const r3 = applyAction(g, 'B', { type: 'NAME_GOOSE', cardId: 'g1', names: ['Steal'] });
   ok(!!r3.error, 'cannot name a goose you do not hold');
 }

@@ -7,9 +7,13 @@ import { CARD_META, SET_ASIDE, TRADE_COST, WIN_SCORE, ANNOUNCE_AT, points } from
 let _id = 0;
 const newId = () => `c${++_id}`;
 
-// Only the plain goose cards can be named (not Wilds / Ungoosables). The number
-// of names a card can hold equals its point value: Goose 1, Geese 2, Geeses 4.
-const NAMEABLE = new Set(['GOOSE', 'GEESE', 'GEESES']);
+// Every goose can be named — regular geese AND wild geese (not Big Boy, the
+// villain). The number of names a card holds equals its point value:
+// Goose/Ungoosable/etc 1, Geese/Great Honkeror 2, Geeses 4.
+const NAMEABLE = new Set([
+  'GOOSE', 'GEESE', 'GEESES',
+  'UNGOOSABLE', 'GOOSE_GANG', 'GET_GOOSED', 'LAWN_MOWER', 'GREAT_HONKEROR',
+]);
 const nameSlots = (kind) => (NAMEABLE.has(kind) ? points(kind) : 0);
 
 // Mulberry32 — small seedable RNG so tests are deterministic.
@@ -59,12 +63,14 @@ export function collectNames(state) {
   return out;
 }
 
-// Stamp carried-over name-sets onto fresh, unnamed cards of the same kind.
-function applyCarriedNames(deck, carry) {
+// Stamp carried-over name-sets onto fresh, unnamed cards of the same kind, in
+// whichever deck holds that kind (goose deck or wild deck).
+function applyCarriedNames(decks, carry) {
   if (!Array.isArray(carry)) return;
+  const all = [].concat(...decks);
   for (const entry of carry) {
     if (!entry || !NAMEABLE.has(entry.kind) || !Array.isArray(entry.names) || !entry.names.length) continue;
-    const card = deck.find((c) => c.kind === entry.kind && !c.names);
+    const card = all.find((c) => c.kind === entry.kind && !c.names);
     if (card) card.names = entry.names.slice(0, points(entry.kind));
   }
 }
@@ -107,7 +113,7 @@ export function createGame(players, options = {}) {
 
   // Carry over geese players named last game: stamp those name-sets onto fresh
   // cards of the same kind so the named geese live on into this game's deck.
-  applyCarriedNames(state.gooseDraw, options.carryNames);
+  applyCarriedNames([state.gooseDraw, state.wildDraw], options.carryNames);
 
   // Defending champion starts holding The Great Honkeror (+2).
   if (state.honkerorHolderId) {
@@ -294,7 +300,8 @@ export function applyAction(state, playerId, action) {
 function nameGoose(state, playerId, action) {
   const p = findPlayer(state, playerId);
   if (!p) return err(state, 'Unknown goose.');
-  const card = p.regular.find((c) => c.id === action.cardId);
+  const card = p.regular.find((c) => c.id === action.cardId)
+    || p.wild.find((c) => c.id === action.cardId);   // regular AND wild geese are nameable
   if (!card) return err(state, 'You can only name geese in your own gaggle.');
   const max = nameSlots(card.kind);
   if (max === 0) return err(state, 'That card can\'t be named.');

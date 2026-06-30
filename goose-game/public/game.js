@@ -24,8 +24,12 @@ let lastFxId = 0, fxPrimed = false;
 let laneTimer = null;
 
 const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' };
-// How many names each goose card can hold (matches its point value).
-const NAME_MAX = { GOOSE: 1, GEESE: 2, GEESES: 4 };
+// How many names each card can hold (matches its point value). Regular AND
+// wild geese are nameable; Big Boy is not.
+const NAME_MAX = {
+  GOOSE: 1, GEESE: 2, GEESES: 4,
+  UNGOOSABLE: 1, GOOSE_GANG: 1, GET_GOOSED: 1, LAWN_MOWER: 1, GREAT_HONKEROR: 2,
+};
 // Playful suggestions shown as placeholders when naming a goose.
 const GOOSE_PUNS = [
   'Honk Williams Jr.', 'Quackary', 'Sir Honks-a-lot', 'Gandalf the Greywing',
@@ -345,36 +349,40 @@ function renderPlayers() {
   }
 }
 
+// Build a gaggle card: the card + its name caption, click-to-name when
+// nameable, or trade-select when trading. Used for wild AND regular geese.
+function gaggleSlot(c, canTrade) {
+  const slot = document.createElement('div');
+  slot.className = 'card-slot';
+  const el = cardEl(c, canTrade);
+  if (canTrade) {
+    if (tradeSel.has(c.id)) el.classList.add('selected');
+    el.onclick = () => {
+      tradeSel.has(c.id) ? tradeSel.delete(c.id) : tradeSel.add(c.id);
+      renderMine(); renderControls(); renderPlayArea();
+    };
+  } else if (NAME_MAX[c.kind]) {
+    el.classList.add('nameable');
+    el.title = 'Click to name this goose';
+    el.onclick = () => { playSound('click'); openNameModal(c.id); };
+  }
+  slot.appendChild(el);
+  const names = c.names || [];
+  const cap = document.createElement('div');
+  cap.className = 'card-cap';
+  if (names.length) cap.textContent = names.join(' · ');
+  else if (NAME_MAX[c.kind] && !canTrade) cap.innerHTML = '<span class="unnamed">name me</span>';
+  slot.appendChild(cap);
+  return slot;
+}
+
 function renderMine() {
   if (spectating) return;           // spectators have no hand
   const p = me();
   const wild = $('myWild'); wild.innerHTML = '';
-  (p.wild || []).forEach((c) => wild.appendChild(cardEl(c, false)));
+  (p.wild || []).forEach((c) => wild.appendChild(gaggleSlot(c, false)));  // wilds: nameable, never traded
   const reg = $('myRegular'); reg.innerHTML = '';
-  (p.regular || []).forEach((c) => {
-    const slot = document.createElement('div');
-    slot.className = 'card-slot';
-    const el = cardEl(c, tradeMode);
-    if (tradeMode) {
-      if (tradeSel.has(c.id)) el.classList.add('selected');
-      el.onclick = () => {
-        tradeSel.has(c.id) ? tradeSel.delete(c.id) : tradeSel.add(c.id);
-        renderMine(); renderControls(); renderPlayArea();
-      };
-    } else if (NAME_MAX[c.kind]) {
-      el.classList.add('nameable');
-      el.title = 'Click to name this goose';
-      el.onclick = () => { playSound('click'); openNameModal(c.id); };
-    }
-    slot.appendChild(el);
-    const names = c.names || [];
-    const cap = document.createElement('div');
-    cap.className = 'card-cap';
-    if (names.length) cap.textContent = names.join(' · ');
-    else if (NAME_MAX[c.kind] && !tradeMode) cap.innerHTML = '<span class="unnamed">name me</span>';
-    slot.appendChild(cap);
-    reg.appendChild(slot);
-  });
+  (p.regular || []).forEach((c) => reg.appendChild(gaggleSlot(c, tradeMode)));
   // Total points = regular geese + wild geese (matches your score on the panel).
   const total = [...(p.regular || []), ...(p.wild || [])]
     .reduce((s, c) => s + (cardMeta[c.kind]?.points || 0), 0);
@@ -441,7 +449,8 @@ function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tr
 // they survive the reshuffle and travel to whoever next draws the card.
 function openNameModal(cardId, onClose) {
   const done = () => { wrap.remove(); onClose && onClose(); };
-  const card = me().regular?.find((c) => c.id === cardId);
+  const card = (me().regular || []).find((c) => c.id === cardId)
+    || (me().wild || []).find((c) => c.id === cardId);
   const max = card ? (NAME_MAX[card.kind] || 0) : 0;
   const wrap = document.createElement('div');
   wrap.className = 'overlay name-modal';
@@ -713,7 +722,8 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
 function buildDrawCaption(cardId, faceKind, hooks) {
   const tag = document.createElement('div');
   tag.className = 'draw-caption';
-  const card = me().regular?.find((c) => c.id === cardId);
+  const card = (me().regular || []).find((c) => c.id === cardId)
+    || (me().wild || []).find((c) => c.id === cardId);
   const meta = cardMeta[faceKind] || {};
   const names = card?.names || [];
   const max = NAME_MAX[faceKind] || 0;
