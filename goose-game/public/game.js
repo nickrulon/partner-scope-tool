@@ -1026,7 +1026,8 @@ function buildPondBar() {
     const px = [6, 10, 16][i];
     dot.style.width = dot.style.height = px + 'px';
     b.appendChild(dot);
-    b.onclick = () => { setErase(false); pondWeight = i; weights.querySelectorAll('.dd-weight').forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    // Weight stays live in eraser mode — it sets the eraser's size too.
+    b.onclick = () => { pondWeight = i; weights.querySelectorAll('.dd-weight').forEach((x, j) => x.classList.toggle('sel', j === i)); };
     weights.appendChild(b);
   });
   const eraser = btn('Eraser', 'btn-ghost dd-mini dd-eraser' + (pondErase ? ' sel' : ''), () => setErase(!pondErase));
@@ -1040,15 +1041,20 @@ function buildPondBar() {
 $('pondBtn').onclick = () => { playSound('click'); setPondMode(!pondMode); };
 
 // The eraser: rub over strokes to pick them off. Hits are hidden instantly
-// (optimistic) and batched to the server.
+// (optimistic) and batched to the server. Its reach follows the selected
+// weight — light is a precision pick, bold is a broad sweep — plus the
+// stroke's own thickness (an eraser edge meeting a crayon line).
+const brushRNorm = (w) => BRUSH_R[w] * (1000 / 600);   // brush radius in zone-normalized units
 function eraseAt(e) {
   const hit = zoneAt(e.clientX, e.clientY);
   if (!hit) return;
   const [x, y] = pondXY(e, hit.r);
+  const eraseR = brushRNorm(pondWeight);
   for (const s of (view.pond || [])) {
     if (s.z !== hit.z || s.i == null || erasePending.has(s.i)) continue;
+    const reach = eraseR + brushRNorm(s.w);
     for (let i = 0; i + 1 < s.p.length; i += 2) {
-      if (Math.hypot(s.p[i] - x, s.p[i + 1] - y) < 55) {
+      if (Math.hypot(s.p[i] - x, s.p[i + 1] - y) < reach) {
         erasePending.add(s.i);
         eraseBatch.add(s.i);
         break;
