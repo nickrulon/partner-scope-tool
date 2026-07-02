@@ -526,6 +526,18 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .overlay-controls .btn { font-size: 1rem; }
 .overlay-msg { color: var(--cream); font-family: var(--type); font-size: 1.1rem; }
 
+/* ---------- solo button + Host Pass sheet ---------- */
+.solo-btn { background: #fbf6e7; color: var(--ink); border-color: var(--paper-edge); margin-top: 8px; }
+.solo-btn:hover { border-color: var(--bill); }
+.pass-modal { z-index: 160; }
+.pass-box { width: min(94vw, 420px); padding: 22px; display: flex; flex-direction: column; gap: 10px; }
+.pass-title { font-family: var(--display); font-size: 1.5rem; color: var(--bill-dark); text-align: center; }
+.pass-body { font-size: .95rem; color: var(--ink); }
+.pass-list { margin: 0; padding-left: 20px; font-size: .9rem; color: var(--ink); line-height: 1.5; }
+.pass-note { font-size: .78rem; color: var(--ink-soft); text-align: center; }
+.pass-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.pass-actions .btn-ghost { color: var(--ink); border-color: var(--ink); }
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);

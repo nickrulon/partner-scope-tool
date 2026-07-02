@@ -91,7 +91,11 @@ async function makeRoom(names, { start = true } = {}) {
 // --- boot the server --------------------------------------------------------
 
 const server = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
-  env: { ...process.env, GOOSE_PORT: String(PORT), GOOSE_GRACE_MS: '600', GOOSE_REAP_MS: '600' },
+  env: {
+    ...process.env,
+    GOOSE_PORT: String(PORT), GOOSE_GRACE_MS: '600', GOOSE_REAP_MS: '600',
+    GOOSE_DB: ':memory:', GOOSE_DEV_SECRET: 'test-secret',
+  },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise((res, rej) => {
@@ -244,6 +248,49 @@ try {
     await clients[1].wait(isState((s) => (s.pond || []).some((x) => x.z === 'waitcard' && x.c === 7)), 'waitcard stroke visible');
     ok(true, 'doodling works in the waiting room (and white survives the clamp)');
     clients.forEach((c) => c.close());
+  }
+
+  console.log('\n== Host Pass gating: iOS pays to host, web and solo stay free ==');
+  {
+    // iOS client without the pass: multiplayer create refused, solo allowed.
+    const ios = await newClient('ios');
+    ios.send('hello', { accountId: 'a_iostester01', platform: 'ios' });
+    const acct = await ios.wait((m) => m.type === 'account', 'account handshake');
+    ok(acct.payload.accountId === 'a_iostester01' && acct.payload.entitlements.length === 0,
+      'anonymous account registered with no entitlements');
+    ios.send('create', { name: 'Appy' });
+    const gate = await ios.wait((m) => m.type === 'error' && m.payload.code === 'NEED_HOST_PASS', 'create gated');
+    ok(!!gate, 'iOS client without Host Pass cannot create a multiplayer pond');
+    ios.send('create', { name: 'Appy', solo: true });
+    await ios.wait((m) => m.type === 'joined', 'solo pond created');
+    const soloState = await ios.wait(isState((s) => s.solo && s.members.length === 2), 'solo pre-stocked');
+    ok(soloState.payload.members.some((x) => x.isBot), 'solo pond is free and comes with a computer goose');
+    // Another human cannot pile into a solo pond.
+    const gate2 = await newClient('gatecrash');
+    gate2.send('join', { code: soloState.payload.code, name: 'Crasher' });
+    const nope = await gate2.wait((m) => m.type === 'error' && /solo/i.test(m.payload.message), 'solo join blocked');
+    ok(!!nope, 'humans cannot join a solo pond');
+    gate2.close();
+    // Grant the Host Pass via the dev endpoint (stand-in for StoreKit) → re-hello → create works.
+    const resp = await fetch(`http://localhost:${PORT}/dev/grant?secret=test-secret&account=a_iostester01&product=host_pass`, { method: 'POST' });
+    ok(resp.ok, 'dev grant accepted');
+    ios.send('hello', { accountId: 'a_iostester01', platform: 'ios' });
+    const acct2 = await ios.wait((m) => m.type === 'account' && m.payload.entitlements.includes('host_pass'), 'entitlement visible');
+    ok(!!acct2, 'account now owns the Host Pass');
+    ios.send('create', { name: 'Appy' });
+    await ios.wait((m) => m.type === 'joined' && !m.payload.spectator, 'multiplayer create allowed');
+    ok(true, 'Host Pass unlocks multiplayer hosting on iOS');
+    // Web clients were never gated (all earlier scenarios created rooms without hello).
+    const web = await newClient('webby');
+    web.send('hello', { accountId: 'a_webtester01', platform: 'web' });
+    await web.wait((m) => m.type === 'account', 'web hello');
+    web.send('create', { name: 'Webby' });
+    await web.wait((m) => m.type === 'joined', 'web create still free');
+    ok(true, 'web hosting stays free (the website is the demo channel)');
+    // Wrong dev secret is refused.
+    const bad = await fetch(`http://localhost:${PORT}/dev/grant?secret=wrong&account=a_x&product=host_pass`, { method: 'POST' });
+    ok(bad.status === 403, 'dev grant refuses a bad secret');
+    ios.close(); web.close();
   }
 
   console.log('\n== Empty rooms are reaped ==');

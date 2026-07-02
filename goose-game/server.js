@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { createGame, applyAction, redact, makeRng, score, collectNames, skipTurn, removePlayer } from './engine.js';
 import { CARD_META, ANNOUNCE_AT } from './cards.js';
+import { touchAccount, grantEntitlement, getEntitlements, hasEntitlement, PRODUCTS } from './store.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, 'public');
@@ -30,6 +31,19 @@ const mimeFor = (fp) => MIME[path.extname(fp).toLowerCase()] || 'application/oct
 // --- Static file server --------------------------------------------------
 
 const httpServer = http.createServer((req, res) => {
+  // Dev/test entitlement grant — enabled ONLY when GOOSE_DEV_SECRET is set
+  // (never in production). Lets us test host-gating before StoreKit exists.
+  if (req.method === 'POST' && req.url.startsWith('/dev/grant')) {
+    const params = new URL(req.url, 'http://x').searchParams;
+    if (!process.env.GOOSE_DEV_SECRET || params.get('secret') !== process.env.GOOSE_DEV_SECRET) {
+      res.writeHead(403); return res.end('nope');
+    }
+    const ok = grantEntitlement(params.get('account'), params.get('product') || 'host_pass', { platform: 'dev' });
+    res.writeHead(ok ? 200 : 400, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ granted: ok }));
+  }
+  if (req.url === '/healthz') { res.writeHead(200); return res.end('honk'); }
+
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC, urlPath));
@@ -84,6 +98,7 @@ function roomView(room, viewerId, asSpectator = false) {
     code: room.code,
     hostId: room.hostId,
     started: !!room.game,
+    solo: !!room.solo,
     spectator: asSpectator,
     spectatorCount: (room.spectators || new Map()).size,
     // Who's watching, by name — rendered as the "birdwatchers" strip. Kept
@@ -296,6 +311,7 @@ function armGraceTimer(room) {
 
 function handle(ws, type, payload) {
   switch (type) {
+    case 'hello':     return doHello(ws, payload);
     case 'create':    return doCreate(ws, payload);
     case 'join':      return doJoin(ws, payload);
     case 'spectate':  return doSpectate(ws, payload);
@@ -361,16 +377,51 @@ function uniqueName(room, name, pid) {
   }
 }
 
-function doCreate(ws, { name, playerId }) {
+// --- Accounts & entitlements ----------------------------------------------
+// Anonymous device accounts: the client generates a stable opaque id and
+// introduces itself with `hello`. Purchases (Host Pass, future packs) attach
+// to that account. Platform matters: 'ios' clients are host-gated behind the
+// Host Pass; 'web' stays free (the website is the free demo/growth channel).
+
+function doHello(ws, { accountId, platform }) {
+  const id = (typeof accountId === 'string' && /^a_[a-z0-9]{6,32}$/i.test(accountId))
+    ? accountId : `a_${Math.random().toString(36).slice(2, 12)}`;
+  const plat = platform === 'ios' ? 'ios' : 'web';
+  touchAccount(id, plat);
+  ws.meta.accountId = id;
+  ws.meta.platform = plat;
+  send(ws, 'account', { accountId: id, platform: plat, entitlements: getEntitlements(id) });
+}
+
+const needsHostPass = (ws) => ws.meta.platform === 'ios' && !hasEntitlement(ws.meta.accountId, 'host_pass');
+
+function doCreate(ws, { name, playerId, solo }) {
+  // "Host owns the room": on iOS, creating a MULTIPLAYER room requires the
+  // Host Pass. Solo ponds (you + computer geese) are free for everyone —
+  // that's the try-before-you-buy experience.
+  if (!solo && needsHostPass(ws)) {
+    return send(ws, 'error', {
+      code: 'NEED_HOST_PASS',
+      message: 'Hosting yer own pond takes a Host Pass. You can still join any pond with a code, or play the computer for free.',
+    });
+  }
   const code = makeCode();
   const pid = playerId || `p${Math.random().toString(36).slice(2, 9)}`;
   const room = {
     code, hostId: pid, members: new Map(), game: null, lastWinnerId: null,
     votes: new Map(), decided: null, boutaGooseRule: true,
     botTimer: null, startTimer: null, spectators: new Map(),
+    solo: !!solo,
   };
   rooms.set(code, room);
   joinRoom(ws, room, pid, cleanName(name, room));
+  // Solo ponds come pre-stocked with a computer goose so the game is one
+  // vote away from starting.
+  if (room.solo) {
+    const botId = `bot_${Math.random().toString(36).slice(2, 9)}`;
+    room.members.set(botId, { playerId: botId, name: pickGooseName(room), ws: null, isBot: true });
+    afterVoteChange(room);
+  }
 }
 
 function doJoin(ws, { code, name, playerId }) {
@@ -378,6 +429,10 @@ function doJoin(ws, { code, name, playerId }) {
   if (!room) return send(ws, 'error', { message: 'No room with that code.' });
   const pid = playerId || `p${Math.random().toString(36).slice(2, 9)}`;
   const existing = room.members.get(pid);
+  // Solo ponds are one human + computers — only that human may (re)join.
+  if (room.solo && !existing && !(room.game && room.game.players.some((p) => p.id === pid))) {
+    return send(ws, 'error', { message: "That's a solo pond — the goose in it is playin' the computer." });
+  }
   const knownById = !!existing || (room.game && room.game.players.some((p) => p.id === pid));
   if (room.game && !knownById) {
     // Reconnecting from a new device / cleared storage: reclaim your seat by

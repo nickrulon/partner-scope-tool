@@ -11,6 +11,17 @@ const PID_KEY = 'goose_pid';
 let playerId = localStorage.getItem(PID_KEY) || `p${Math.random().toString(36).slice(2, 9)}`;
 localStorage.setItem(PID_KEY, playerId);
 
+// ---- account & platform ----
+// Anonymous device account: a stable opaque id, registered with the server on
+// every connect. Purchases (Host Pass, packs) attach to it. In the iOS app,
+// Capacitor is present and hosting is gated; on the web everything stays free.
+const ACCT_KEY = 'goose_acct';
+let accountId = localStorage.getItem(ACCT_KEY) || `a_${Math.random().toString(36).slice(2, 12)}`;
+localStorage.setItem(ACCT_KEY, accountId);
+const PLATFORM = (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'ios')
+  ? 'ios' : (window.GOOSE_PLATFORM || 'web');
+let myEntitlements = [];
+
 const SID_KEY = 'goose_sid';
 let spectatorId = localStorage.getItem(SID_KEY) || `s_${Math.random().toString(36).slice(2, 9)}`;
 localStorage.setItem(SID_KEY, spectatorId);
@@ -88,6 +99,8 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
   ws.onopen = () => {
+    // Introduce the account first — entitlements gate what create can do.
+    ws.send(JSON.stringify({ type: 'hello', payload: { accountId, platform: PLATFORM } }));
     if (wsQueue.length) {
       // The user already clicked something — their intent wins over auto-rejoin.
       const q = wsQueue; wsQueue = [];
@@ -109,7 +122,13 @@ function connect() {
       leaving = false;   // we (re)joined something — accept states again
     }
     else if (type === 'state') { if (leaving) return; view = payload; render(); }
+    else if (type === 'account') {
+      // Server-confirmed identity + owned products.
+      if (payload.accountId) { accountId = payload.accountId; localStorage.setItem(ACCT_KEY, accountId); }
+      myEntitlements = payload.entitlements || [];
+    }
     else if (type === 'error') {
+      if (payload.code === 'NEED_HOST_PASS') { showHostPassSheet(); return; }
       toast(payload.message); $('lobbyErr').textContent = payload.message;
       if (/no room with that code/i.test(payload.message)) localStorage.removeItem(ROOM_KEY); // stale room — don't keep retrying
     }
@@ -140,6 +159,8 @@ function sendWs(type, payload = {}) {
 // ---- lobby wiring ----
 // Send the name blank if unset — the server assigns a fun honk-pun name.
 $('createBtn').onclick = () => { leaving = false; playSound('click'); sendWs('create', { name: $('nameInput').value, playerId }); };
+// Solo pond: you + computer geese. Free everywhere — never host-gated.
+$('soloBtn').onclick = () => { leaving = false; playSound('click'); sendWs('create', { name: $('nameInput').value, playerId, solo: true }); };
 $('joinBtn').onclick = () => { leaving = false; playSound('click'); sendWs('join', { code: $('codeInput').value, name: $('nameInput').value, playerId }); };
 $('watchBtn').onclick = () => { leaving = false; playSound('click'); sendWs('spectate', { code: $('codeInput').value, name: $('nameInput').value || 'Spectator', playerId: spectatorId }); };
 $('codeInput').addEventListener('input', (e) => e.target.value = e.target.value.toUpperCase());
@@ -230,6 +251,49 @@ $('soundToggle').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isM
 $('muteToggle').onchange = (e) => { setMuted(e.target.checked); syncSoundUI(); };
 $('volSlider').oninput = (e) => { setVolume(e.target.value / 100); };
 $('volSlider').onchange = () => playSound('click');
+
+// ---- Host Pass upgrade sheet ----
+// Shown when an iOS client without the Host Pass tries to create a
+// multiplayer room. The actual StoreKit purchase is wired via the
+// window.GoosePurchase adapter (installed by the app shell); on the web this
+// sheet never appears because web hosting isn't gated.
+function showHostPassSheet() {
+  document.querySelectorAll('.pass-modal').forEach((m) => m.remove());
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay pass-modal';
+  const box = document.createElement('div');
+  box.className = 'paper pass-box';
+  box.innerHTML =
+    `<div class="pass-title">Host yer own pond</div>
+     <div class="pass-body">The <strong>Host Pass</strong> is a one-time purchase that unlocks:</div>
+     <ul class="pass-list">
+       <li>Create multiplayer ponds &amp; invite friends with a code or link</li>
+       <li>Pick the house rules for your games</li>
+       <li>Your expansion packs work for everyone in your pond</li>
+     </ul>
+     <div class="pass-note">Joinin' someone else's pond and playin' the computer stay free, always.</div>`;
+  const row = document.createElement('div');
+  row.className = 'pass-actions';
+  const buy = btn('Get the Host Pass — $2.99', 'btn-primary', async () => {
+    if (window.GoosePurchase && window.GoosePurchase.buyHostPass) {
+      try { await window.GoosePurchase.buyHostPass(); } catch { /* user cancelled */ }
+    } else {
+      toast('Purchases work in the app — this is the free web pond, where hosting is free anyway!');
+    }
+  });
+  const restore = btn('Restore purchase', 'btn-ghost', async () => {
+    if (window.GoosePurchase && window.GoosePurchase.restore) {
+      try { await window.GoosePurchase.restore(); } catch { /* ignore */ }
+    }
+  });
+  row.appendChild(buy);
+  row.appendChild(restore);
+  row.appendChild(btn('Not now', 'btn-ghost', () => wrap.remove()));
+  box.appendChild(row);
+  wrap.appendChild(box);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
 
 // ---- top-level render ----
 function showScreen(id) { ['lobby', 'waiting', 'game'].forEach((s) => $(s).classList.toggle('hidden', s !== id)); }

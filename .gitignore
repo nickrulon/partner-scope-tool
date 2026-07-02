@@ -9,3 +9,6 @@ server/outputs/
 
 # macOS Finder metadata
 .DS_Store
+
+# goose-game runtime data (accounts/purchases live on a persistent volume in prod)
+goose-game/data/
