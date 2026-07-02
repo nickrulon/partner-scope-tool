@@ -1,0 +1,14 @@
+{
+  "name": "quit-goosin-around",
+  "version": "1.0.0",
+  "description": "Real-time multiplayer card game: silly geese vs. one bad little boy.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node engine.test.js && node server.test.js"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  }
+}

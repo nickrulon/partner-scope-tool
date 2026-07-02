@@ -33,7 +33,9 @@ const httpServer = http.createServer((req, res) => {
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC, urlPath));
-  if (!filePath.startsWith(PUBLIC)) { res.writeHead(403); return res.end('nope'); }
+  // Prefix must include the separator, or a sibling dir like `public-x`
+  // would pass the check.
+  if (!filePath.startsWith(PUBLIC + path.sep)) { res.writeHead(403); return res.end('nope'); }
 
   fs.readFile(filePath, (e, data) => {
     if (e) { res.writeHead(404); return res.end('Not found'); }
@@ -62,6 +64,7 @@ function makeCode() {
 function getRoom(code) { return rooms.get((code || '').toUpperCase()); }
 
 function broadcast(room) {
+  if (room.game) armGraceTimer(room);   // re-check "waiting on an away goose?" on every state change
   for (const m of room.members.values()) {
     if (m.isBot || !m.ws || m.ws.readyState !== m.ws.OPEN) continue; // bots have no socket
     send(m.ws, 'state', roomView(room, m.playerId));
@@ -83,6 +86,9 @@ function roomView(room, viewerId, asSpectator = false) {
     started: !!room.game,
     spectator: asSpectator,
     spectatorCount: (room.spectators || new Map()).size,
+    // Who's watching, by name — rendered as the "birdwatchers" strip. Kept
+    // separate from members so watchers never read as seats.
+    spectators: [...(room.spectators || new Map()).values()].map((s) => ({ id: s.id, name: s.name })),
     boutaGooseRule: room.boutaGooseRule !== false,
     // Named geese carried from a previous game, and whether we'll keep them.
     carryNamesAvailable: !!(room.carryNames && room.carryNames.length),
@@ -104,7 +110,9 @@ function send(ws, type, payload) {
 
 // --- WebSocket protocol --------------------------------------------------
 
-const wss = new WebSocketServer({ server: httpServer });
+// maxPayload: the biggest legit message is a chat line — cap frames well below
+// the 100MB ws default so one hostile client can't balloon memory.
+const wss = new WebSocketServer({ server: httpServer, maxPayload: 16 * 1024 });
 
 wss.on('connection', (ws) => {
   ws.meta = { roomCode: null, playerId: null };
@@ -120,17 +128,89 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     const room = getRoom(ws.meta.roomCode);
     if (!room) return;
-    if (ws.meta.isSpectator) { room.spectators.delete(ws.meta.playerId); broadcast(room); return; }
+    if (ws.meta.isSpectator) {
+      room.spectators.delete(ws.meta.playerId);
+      scheduleReap(room);
+      broadcast(room);
+      return;
+    }
     const m = room.members.get(ws.meta.playerId);
     if (m && m.ws === ws) {
       if (room.game) {
+        // Mid-game: keep the seat (they can reconnect), just mark it away.
         const gp = room.game.players.find((p) => p.id === m.playerId);
         if (gp) gp.connected = false;
+      } else {
+        // Lobby: drop them entirely — a ghost member would linger in the vote
+        // list forever and get seated as a zombie when the game starts.
+        room.members.delete(m.playerId);
+        dropVotesFor(room, m.playerId);
+        handOffHost(room, m.playerId);
       }
     }
-    if (!room.game && !room.decided) afterVoteChange(room); else broadcast(room);
+    scheduleReap(room);
+    if (!room.game) afterVoteChange(room); else broadcast(room);
   });
 });
+
+// Delete every vote cast BY this goose and every vote cast FOR them — a stale
+// vote for a departed candidate would otherwise still count toward unanimity.
+function dropVotesFor(room, playerId) {
+  room.votes.delete(playerId);
+  for (const [voter, cand] of [...room.votes]) if (cand === playerId) room.votes.delete(voter);
+}
+
+// If the departing goose was the host, promote the first connected human.
+function handOffHost(room, leavingId) {
+  if (leavingId !== room.hostId) return;
+  const next = [...room.members.values()].find((m) => !m.isBot && m.ws && m.ws.readyState === m.ws.OPEN);
+  if (next) room.hostId = next.playerId;
+}
+
+// Rooms live in memory only — reap any room that's had no connected humans
+// (players or spectators) for 10 minutes, so codes and memory free up.
+const REAP_MS = Number(process.env.GOOSE_REAP_MS) || 10 * 60 * 1000;   // env override for tests
+function roomHasHumans(room) {
+  return [...room.members.values()].some((m) => !m.isBot && m.ws && m.ws.readyState === m.ws.OPEN)
+    || [...room.spectators.values()].some((s) => s.ws && s.ws.readyState === s.ws.OPEN);
+}
+function scheduleReap(room) {
+  clearTimeout(room.reapTimer);
+  if (roomHasHumans(room)) return;
+  room.reapTimer = setTimeout(() => {
+    if (roomHasHumans(room)) return;
+    clearTimeout(room.botTimer);
+    clearTimeout(room.graceTimer);
+    rooms.delete(room.code);
+  }, REAP_MS);
+}
+
+// Whose input is the game waiting on right now?
+function actorNeeded(g) {
+  if (!g || g.phase === 'GAME_OVER') return null;
+  return (g.phase === 'AWAIT_BIG_BOY' || g.phase === 'AWAIT_GET_GOOSED' || g.phase === 'AWAIT_ANNOUNCE')
+    ? g.pending?.target
+    : g.players[g.turnIndex]?.id;
+}
+
+// If the game is waiting on a disconnected human, auto-skip them after a grace
+// window so one dropped wifi connection doesn't stall the whole pond.
+const GRACE_MS = Number(process.env.GOOSE_GRACE_MS) || 60 * 1000;      // env override for tests
+function armGraceTimer(room) {
+  clearTimeout(room.graceTimer);
+  const actorId = actorNeeded(room.game);
+  if (!actorId) return;
+  const m = room.members.get(actorId);
+  if (!m || m.isBot || isConnected(m)) return;
+  room.graceTimer = setTimeout(() => {
+    if (actorNeeded(room.game) !== actorId) return;      // game moved on
+    const m2 = room.members.get(actorId);
+    if (m2 && isConnected(m2)) return;                    // they came back
+    room.game = skipTurn(room.game, { auto: true });
+    broadcast(room);
+    maybeRunBot(room);
+  }, GRACE_MS);
+}
 
 function handle(ws, type, payload) {
   switch (type) {
@@ -157,13 +237,17 @@ function handle(ws, type, payload) {
 function joinRoom(ws, room, playerId, name) {
   ws.meta = { roomCode: room.code, playerId };
   room.members.set(playerId, { playerId, name, ws });
+  scheduleReap(room);   // a human is here — cancel any pending reap
   if (room.game) {
     const gp = room.game.players.find((p) => p.id === playerId);
     if (gp) { gp.connected = true; gp.name = name; }
   }
   send(ws, 'joined', { code: room.code, playerId, hostId: room.hostId });
-  if (!room.game && !room.decided) afterVoteChange(room); // recompute vote with the new goose
-  else { broadcast(room); if (room.game) maybeRunBot(room); }
+  // Membership changed → always recompute unanimity. (Previously a goose
+  // joining AFTER the vote was unanimous left `decided` set, so the Start
+  // button looked live but doStart re-checked the vote and failed.)
+  if (!room.game) afterVoteChange(room);
+  else { broadcast(room); maybeRunBot(room); }
 }
 
 // Honk-pun names — used for computer geese AND for any human who joins without
@@ -179,6 +263,20 @@ function pickGooseName(room) {
   return GOOSE_NAMES.find((n) => !used.has(n)) || `Goose ${room.members.size + 1}`;
 }
 const cleanName = (name, room) => (name && name.trim() ? name.trim().slice(0, 20) : pickGooseName(room));
+
+// Two geese with the same name breaks name-based reconnects (and the table's
+// sanity) — de-dupe by appending a number: "Bob", "Bob 2", "Bob 3"…
+function uniqueName(room, name, pid) {
+  const taken = (n) => [...room.members.values()].some(
+    (m) => m.playerId !== pid && m.name.toLowerCase() === n.toLowerCase(),
+  );
+  if (!taken(name)) return name;
+  const base = name.slice(0, 17);
+  for (let i = 2; ; i++) {
+    const candidate = `${base} ${i}`;
+    if (!taken(candidate)) return candidate;
+  }
+}
 
 function doCreate(ws, { name, playerId }) {
   const code = makeCode();
@@ -200,12 +298,18 @@ function doJoin(ws, { code, name, playerId }) {
   const knownById = !!existing || (room.game && room.game.players.some((p) => p.id === pid));
   if (room.game && !knownById) {
     // Reconnecting from a new device / cleared storage: reclaim your seat by
-    // matching the exact name you were playing under.
+    // matching the exact name you were playing under — but ONLY if that seat
+    // is disconnected. Otherwise anyone with the room code + a player's name
+    // could hijack a live seat and see their hand.
     const want = (name || '').trim().toLowerCase();
     const seat = want && room.game.players.find((p) => !p.removed && p.name.toLowerCase() === want);
+    if (seat && seat.connected) {
+      return send(ws, 'error', { message: `"${seat.name}" is still connected — that seat isn't up for grabs.` });
+    }
     if (seat) {
       ws.meta = { roomCode: room.code, playerId: seat.id };   // adopt the existing seat id
       room.members.set(seat.id, { playerId: seat.id, name: seat.name, ws });
+      scheduleReap(room);
       seat.connected = true;
       send(ws, 'joined', { code: room.code, playerId: seat.id, hostId: room.hostId });
       broadcast(room);
@@ -214,7 +318,12 @@ function doJoin(ws, { code, name, playerId }) {
     }
     return send(ws, 'error', { message: 'Game in progress — rejoin with the exact name you used, or wait for a rematch.' });
   }
-  joinRoom(ws, room, pid, (name && name.trim()) ? name.trim().slice(0, 20) : (existing?.name || pickGooseName(room)));
+  // The 8-goose cap applies to NEW joins only (rejoining members always fit).
+  if (!knownById && room.members.size >= 8) {
+    return send(ws, 'error', { message: 'The pond is full (8 geese max).' });
+  }
+  const wanted = (name && name.trim()) ? name.trim().slice(0, 20) : (existing?.name || pickGooseName(room));
+  joinRoom(ws, room, pid, uniqueName(room, wanted, pid));
 }
 
 // --- Silliest-goose vote ------------------------------------------------
@@ -230,7 +339,14 @@ function doSpectate(ws, { code, name, playerId }) {
   const sid = (typeof playerId === 'string' && playerId.startsWith('s_'))
     ? playerId : `s_${Math.random().toString(36).slice(2, 9)}`;
   ws.meta = { roomCode: room.code, playerId: sid, isSpectator: true };
-  room.spectators.set(sid, { id: sid, name: (name || 'Spectator').slice(0, 20), ws });
+  // De-dupe watcher names ("Spectator", "Spectator 2", …) so the birdwatchers
+  // strip stays readable.
+  const base = ((name || '').trim() || 'Spectator').slice(0, 20);
+  const used = new Set([...room.spectators.values()].filter((s) => s.id !== sid).map((s) => s.name.toLowerCase()));
+  let specName = base;
+  for (let i = 2; used.has(specName.toLowerCase()); i++) specName = `${base.slice(0, 17)} ${i}`;
+  room.spectators.set(sid, { id: sid, name: specName, ws });
+  scheduleReap(room);   // a human is watching — cancel any pending reap
   send(ws, 'joined', { code: room.code, playerId: sid, hostId: room.hostId, spectator: true });
   send(ws, 'state', roomView(room, sid, true));
   broadcast(room); // let players see the spectator count tick up
@@ -279,8 +395,7 @@ function doRemoveBot(ws, { botId }) {
   const m = room.members.get(botId);
   if (!m || !m.isBot) return;
   room.members.delete(botId);
-  room.votes.delete(botId);
-  for (const [voter, cand] of [...room.votes]) if (cand === botId) room.votes.delete(voter);
+  dropVotesFor(room, botId);
   afterVoteChange(room);
 }
 
@@ -371,7 +486,9 @@ function maybeRunBot(room) {
     : g.players[g.turnIndex]?.id;
   const m = actorId && room.members.get(actorId);
   if (!m || !m.isBot) return;
-  room.botTimer = setTimeout(() => runBotMove(room, actorId), 3000); // give humans ~3s to follow the computer's move
+  // Randomized "thinking" time (~2–4s): humans can follow the move, and no
+  // fixed tell distinguishes a computer's quick decisions from its hard ones.
+  room.botTimer = setTimeout(() => runBotMove(room, actorId), 2000 + Math.random() * 2000);
 }
 
 function runBotMove(room, actorId) {
@@ -381,7 +498,7 @@ function runBotMove(room, actorId) {
   const expected = (responding || g.phase === 'AWAIT_ANNOUNCE') ? g.pending?.target : g.players[g.turnIndex]?.id;
   if (expected !== actorId) return; // state moved on; bail
   let action;
-  if (g.phase === 'AWAIT_ANNOUNCE') action = { type: 'ANNOUNCE_DECISION', announce: true }; // bots always call it
+  if (g.phase === 'AWAIT_ANNOUNCE') action = botAnnounce(g, actorId);
   else if (responding) action = botResponse(g, actorId);
   else action = botTurn(g, actorId);
   const { state } = applyAction(g, actorId, action);
@@ -391,27 +508,58 @@ function runBotMove(room, actorId) {
   maybeRunBot(room);
 }
 
+const pts = (kind) => CARD_META[kind]?.points ?? 0;
+const botScore = (p) => [...p.regular, ...p.wild].reduce((s, c) => s + pts(c.kind), 0);
+
+// Find a set of regular geese worth exactly 4 points (the Wild Market price):
+// one 4, two 2s, a 2 + two 1s, or four 1s.
+function findTradeCombo(p) {
+  const byPts = (n) => p.regular.filter((c) => pts(c.kind) === n);
+  const ones = byPts(1), twos = byPts(2), fours = byPts(4);
+  if (fours.length >= 1) return [fours[0]];
+  if (twos.length >= 2) return twos.slice(0, 2);
+  if (twos.length >= 1 && ones.length >= 2) return [twos[0], ...ones.slice(0, 2)];
+  if (ones.length >= 4) return ones.slice(0, 4);
+  return null;
+}
+
+// Bots only act on PUBLIC info + their own hand (card counts, not opponents'
+// scores or hands) so they play by the same rules of knowledge as a human.
 function botTurn(g, botId) {
   const p = g.players.find((x) => x.id === botId);
-  // (Announcing now happens after the draw, via the AWAIT_ANNOUNCE prompt.)
   // Mow down whoever has the biggest gaggle, if it's worth it.
   if (p.wild.some((w) => w.kind === 'LAWN_MOWER')) {
     const victim = g.players
-      .filter((x) => x.id !== botId && x.connected)
+      .filter((x) => x.id !== botId && !x.removed && x.connected)
       .sort((a, b) => b.regular.length - a.regular.length)[0];
     if (victim && victim.regular.length >= 3) return { type: 'PLAY_LAWN_MOWER', targetId: victim.id };
   }
+  // Sometimes hit the Wild Goose Market: spend an exact-4 set for a Wild when
+  // holding none — insurance (Ungoosable/Goose Gang) against a Big Boy wipe.
+  // Trading doesn't end the turn, so the draw still follows.
+  if (g.wildDraw.length > 0 && p.wild.length === 0 && botScore(p) >= 8 && Math.random() < 0.4) {
+    const combo = findTradeCombo(p);
+    if (combo) return { type: 'TRADE', cardIds: combo.map((c) => c.id) };
+  }
   return { type: 'DRAW' };
+}
+
+// Post-draw announce decision. Staying quiet is a bluff, but at 18+ any draw
+// can bust an unannounced hand at 21 — so bots always call it when close.
+function botAnnounce(g, botId) {
+  const p = g.players.find((x) => x.id === botId);
+  const announce = botScore(p) >= 18 || Math.random() < 0.5;
+  return { type: 'ANNOUNCE_DECISION', announce };
 }
 
 function botResponse(g, botId) {
   const t = g.players.find((x) => x.id === botId);
   if (t.wild.some((w) => w.kind === 'GOOSE_GANG')) return { type: 'RESPOND', response: 'goose_gang' };
-  // Only the original Big Boy drawer may Get Goosed — divert to someone with geese.
-  if (g.phase === 'AWAIT_BIG_BOY' && g.pending.target === g.pending.origin
-      && t.wild.some((w) => w.kind === 'GET_GOOSED')) {
+  // Hot potato: whoever Big Boy is after (drawer OR diverted victim) may send
+  // him on with their own Get Goosed. Aim at the biggest gaggle still in play.
+  if (t.wild.some((w) => w.kind === 'GET_GOOSED') && t.regular.length > 0) {
     const victim = g.players
-      .filter((x) => x.id !== botId && x.connected)
+      .filter((x) => x.id !== botId && !x.removed && x.connected)
       .sort((a, b) => b.regular.length - a.regular.length)[0];
     if (victim) return { type: 'RESPOND', response: 'get_goosed', targetId: victim.id };
   }
@@ -425,6 +573,7 @@ function doRematch(ws, payload) {
   if (room.game && room.game.winnerId) room.lastWinnerId = room.game.winnerId;
   clearTimeout(room.botTimer);
   clearTimeout(room.startTimer);
+  clearTimeout(room.graceTimer);
   room.game = null;
   room.decided = null;
   room.keepNames = true;    // default each round to keeping last game's names (host can opt out)
@@ -478,19 +627,17 @@ function doLeave(ws) {
     room.game = removePlayer(room.game, pid, { left: true });
   }
   room.members.delete(pid);
-  room.votes.delete(pid);
+  dropVotesFor(room, pid);
   ws.meta.roomCode = null;
-  // Hand off host if the host left.
-  if (pid === room.hostId) {
-    const next = [...room.members.values()].find((m) => !m.isBot && m.ws && m.ws.readyState === m.ws.OPEN);
-    if (next) room.hostId = next.playerId;
-  }
-  if (!room.game && !room.decided) afterVoteChange(room); else broadcast(room);
+  handOffHost(room, pid);
+  scheduleReap(room);
+  if (!room.game) afterVoteChange(room); else broadcast(room);
 }
 
 // Lobby nudge: a public "honk" reminding everyone to vote / agree. Throttled
 // per player so it can be playful without spamming the room.
-const HOLLER_KINDS = new Set(['holler1', 'holler2', 'holler3', 'holler4', 'holler5', 'holler6']);
+// holler1 = the "Vote!" clip; holler = the one committed Holler-button sound.
+const HOLLER_KINDS = new Set(['holler1', 'holler']);
 function doNudge(ws, { kind }) {
   const room = getRoom(ws.meta.roomCode);
   if (!room || room.game) return;                 // lobby only
@@ -519,5 +666,5 @@ function doChat(ws, { text }) {
 }
 
 httpServer.listen(PORT, () => {
-  console.log(`🪿 Quit Goosin Around! running at http://localhost:${PORT}`);
+  console.log(`Quit Goosin Around! running at http://localhost:${PORT}`);
 });

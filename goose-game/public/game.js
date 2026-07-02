@@ -25,6 +25,9 @@ let lastFxId = 0, fxPrimed = false;
 let laneTimer = null;
 
 const PILE_BACKS = { gooseDraw: 'GOOSE_CARD_BACK', wildDraw: 'WILD_GOOSE_BACK' };
+// The CSS reduced-motion rule only covers CSS animations — the card flights
+// use the Web Animations API, so they check this flag themselves.
+const REDUCED_MOTION = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 // How many names each card can hold (matches its point value). Regular AND
 // wild geese are nameable; Big Boy is not.
 const NAME_MAX = {
@@ -77,10 +80,22 @@ function autoRejoin() {
 }
 
 // ---- connection ----
+// Messages sent before the socket opens (slow network, Render cold-start) are
+// queued and flushed on open — so an early "Create a Pond" click still lands
+// instead of being silently dropped.
+let wsQueue = [];
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}`);
-  ws.onopen = () => autoRejoin();   // on first load AND every reconnect
+  ws.onopen = () => {
+    if (wsQueue.length) {
+      // The user already clicked something — their intent wins over auto-rejoin.
+      const q = wsQueue; wsQueue = [];
+      q.forEach((m) => ws.send(m));
+    } else {
+      autoRejoin();   // on first load AND every reconnect
+    }
+  };
   ws.onmessage = (ev) => {
     const { type, payload } = JSON.parse(ev.data);
     if (type === 'cardMeta') { cardMeta = payload; Object.keys(cardMeta).forEach(probeArt); Object.values(PILE_BACKS).forEach(probeArt); }
@@ -110,7 +125,11 @@ function connect() {
   };
   ws.onclose = () => { toast('Disconnected — reconnecting…'); setTimeout(connect, 1500); };
 }
-function sendWs(type, payload = {}) { ws.readyState === 1 && ws.send(JSON.stringify({ type, payload })); }
+function sendWs(type, payload = {}) {
+  const msg = JSON.stringify({ type, payload });
+  if (ws && ws.readyState === 1) ws.send(msg);
+  else wsQueue.push(msg);   // flushed by onopen
+}
 
 // ---- lobby wiring ----
 // Send the name blank if unset — the server assigns a fun honk-pun name.
@@ -131,14 +150,20 @@ $('backBtn').onclick = () => {
   showScreen('lobby');
 };
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
+// Copy a one-tap invite link (lobby → prefilled code) to the clipboard.
+$('copyLinkBtn').onclick = async () => {
+  playSound('click');
+  const url = `${location.origin}/?room=${view?.code || ''}`;
+  try { await navigator.clipboard.writeText(url); toast('Invite link copied — honk it at yer friends!'); }
+  catch { window.prompt('Copy this invite link:', url); }   // clipboard blocked (http/permissions)
+};
 $('chatSend').onclick = sendChat;
 $('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChat(); });
 function sendChat() { const t = $('chatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('chatInput').value = ''; } }
 
 // ---- lobby: vote + holler nudges + lobby chat ----
-// "Vote!" always plays holler1 (the "vote" clip); "Holler" cycles the rest.
-const HOLLER_SOUNDS = ['holler2', 'holler3', 'holler4', 'holler5', 'holler6'];
-let hollerIdx = 0;
+// "Vote!" plays holler1 (the "vote" clip); "Holler" is one committed sound:
+// sounds/holler.<ext> (aliased to the old clip until that file exists).
 let lastNudge = 0;
 function sendNudge(kind) {
   const now = Date.now();
@@ -149,7 +174,7 @@ function sendNudge(kind) {
   return true;
 }
 $('voteBtn').onclick = () => sendNudge('holler1');
-$('hollerBtn').onclick = () => { const k = HOLLER_SOUNDS[hollerIdx % HOLLER_SOUNDS.length]; if (sendNudge(k)) hollerIdx++; };
+$('hollerBtn').onclick = () => sendNudge('holler');
 $('lobbyChatSend').onclick = sendLobbyChat;
 $('lobbyChatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendLobbyChat(); });
 function sendLobbyChat() { const t = $('lobbyChatInput').value.trim(); if (t) { sendWs('chat', { text: t }); $('lobbyChatInput').value = ''; } }
@@ -257,7 +282,7 @@ function renderWaiting() {
     const voters = view.members.filter((v) => votes[v.id] === m.id);
     const card = document.createElement('div');
     card.className = 'vote-card' + (myVote === m.id ? ' my-vote' : '') + (voters.length ? ' has-votes' : '');
-    const tags = `${m.id === playerId ? '<span class="vm-you">you</span>' : ''}${m.isBot ? '<span class="vm-bot">computer</span>' : ''}${m.id === view.hostId ? '<span class="vm-host">host</span>' : ''}`;
+    const tags = `${m.id === playerId ? '<span class="vm-you">you</span>' : ''}${m.isBot ? '<span class="vm-bot">computer</span>' : ''}${m.id === view.hostId ? '<span class="vm-host">host</span>' : ''}${!m.connected && !m.isBot ? '<span class="vm-away">away</span>' : ''}`;
     card.innerHTML =
       `<div class="vc-top">
          <span class="vc-name">${esc(m.name)}</span>
@@ -280,6 +305,8 @@ function renderWaiting() {
     }
     list.appendChild(card);
   }
+
+  renderWatchers('lobbyWatchers');
 
   $('hostControls').classList.toggle('hidden', !isHost);
   // "Keep last game's geese" — only when there are names to carry.
@@ -319,6 +346,18 @@ function renderWaiting() {
   $('waitHint').textContent = isHost ? '' : (decided ? `Waiting for the host to start… (${esc(decided.name)} goes first)` : reason);
 }
 
+// The "birdwatchers" strip: everyone watching, by name. Deliberately styled
+// nothing like a player panel (dashed, no score/cards) so a watcher never
+// reads as a seat. Hidden entirely when nobody's watching.
+function renderWatchers(elId) {
+  const el = $(elId);
+  const specs = view.spectators || [];
+  el.classList.toggle('hidden', specs.length === 0);
+  if (!specs.length) { el.innerHTML = ''; return; }
+  el.innerHTML = '<span class="w-label">birdwatchers</span>'
+    + specs.map((s) => `<span class="watcher-chip">${esc(s.name)}${spectating && s.id === spectatorId ? ' <em>(you)</em>' : ''}</span>`).join('');
+}
+
 const me = () => view.game.players.find((p) => p.id === playerId);
 const isMyTurn = () => view.game.turnPlayerId === playerId;
 
@@ -342,6 +381,7 @@ function renderGame() {
 
   renderTurnBanner();
   renderPlayers();
+  renderWatchers('watchers');
   renderMine();
   renderControls();
   renderPlayArea();
@@ -787,8 +827,8 @@ function renderOverlay() {
   if (goosedChoosing) {
     cc.appendChild(msg('Send Big Boy at…'));
     for (const o of g.players) {
-      if (o.id === playerId) continue;
-      cc.appendChild(btn(o.name, '', () => { goosedChoosing = false; respond('get_goosed', o.id); }));
+      if (o.id === playerId || o.removed) continue;   // gone geese can't take the hit
+      cc.appendChild(btn(o.name + (o.connected ? '' : ' (away)'), '', () => { goosedChoosing = false; respond('get_goosed', o.id); }));
     }
     cc.appendChild(btn('Back', 'btn-ghost', () => { goosedChoosing = false; renderOverlay(); }));
     return;
@@ -814,6 +854,9 @@ function handleFx() {
   // "turn passes" banner) waits until the card has finished its trip — so the
   // turn sound lands with a clear visual instead of overlapping the draw sound.
   const drawsThisBatch = fresh.some((f) => f.type === 'DRAW' || (f.type === 'DRAW_HIDDEN' && f.actorId !== playerId));
+  // Likewise: a dramatic event flash (Goose Gang block, absorb, mower…) in the
+  // same batch gets its ~3s on stage before the turn banner replaces it.
+  const flashThisBatch = fresh.some((f) => ['LAWN_MOWER', 'GET_GOOSED', 'GOOSE_GANG', 'ANNOUNCE', 'TRADE', 'PENALTY', 'ABSORB'].includes(f.type));
   const turnFx = fresh.find((f) => f.type === 'TURN');
   const afterDraw = () => { if (turnFx) playTurn(turnFx); };
   // My own trade gets a private reveal of the Wild — so skip the public
@@ -821,7 +864,9 @@ function handleFx() {
   const myTradeReveal = fresh.some((f) => f.type === 'TRADE_REVEAL');
 
   for (const f of fresh) {
-    if (f.type === 'WIN') { playSound(spectating ? 'win' : (f.actor === me()?.name ? 'win' : 'lose')); }
+    // Win/lose picked by seat id (names can collide); fall back to name for
+    // fx emitted by an older server.
+    if (f.type === 'WIN') { playSound(spectating ? 'win' : ((f.actorId ? f.actorId === playerId : f.actor === me()?.name) ? 'win' : 'lose')); }
     // Your own draw: play your private per-card sound, fly it big into center,
     // hold it ~3s so you can read it, then sail it into your gaggle.
     else if (f.type === 'DRAW') {
@@ -837,7 +882,11 @@ function handleFx() {
     else if (f.type === 'TRADE_REVEAL') {
       flyDraw({ faceKind: f.kind, cardId: f.cardId, reveal: true, fromEl: $('wildDraw'), toEl: $('myWild') });
     }
-    else if (f.type === 'TURN') { if (!drawsThisBatch) playTurn(f); }
+    else if (f.type === 'TURN') {
+      if (drawsThisBatch) { /* afterDraw handles it */ }
+      else if (flashThisBatch) setTimeout(() => playTurn(f), 2800);   // let the flash finish first
+      else playTurn(f);
+    }
     else if (f.type === 'PLAYER_OUT') { toast(`${f.actor} ${f.left ? 'left' : 'was removed from'} the room`); }
     else if (f.type === 'ENDED') { /* the GAME_OVER overlay shows the "game ended" banner */ }
     else playSound(fxSound(f.type));
@@ -931,14 +980,14 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
     const out = card.animate([
       { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1 },
       { transform: `translate(${ddx}px,${ddy}px) scale(${destScale})`, opacity: 0.15 },
-    ], { duration: 520, easing: 'cubic-bezier(.5,0,.7,1)', fill: 'forwards' });
+    ], { duration: REDUCED_MOTION ? 1 : 520, easing: 'cubic-bezier(.5,0,.7,1)', fill: 'forwards' });
     out.onfinish = finish; out.oncancel = finish;
   };
 
   const inAnim = card.animate([
     { transform: 'translate(0,0) scale(1)', opacity: 0.6 },
     { transform: `translate(${cdx}px,${cdy}px) scale(${bigScale})`, opacity: 1 },
-  ], { duration: 460, easing: 'cubic-bezier(.3,1.3,.5,1)', fill: 'forwards' });
+  ], { duration: REDUCED_MOTION ? 1 : 460, easing: 'cubic-bezier(.3,1.3,.5,1)', fill: 'forwards' });
   inAnim.oncancel = finish;
   inAnim.onfinish = () => {
     if (reveal) caption = buildDrawCaption(cardId, faceKind, {
@@ -1101,11 +1150,23 @@ function btn(label, cls, fn, opts = {}) {
   b.onclick = () => { opts.seqClick ? enqueueSound('click') : playSound('click'); fn(); };
   return b;
 }
-function hint(text) { const s = document.createElement('div'); s.className = 'hintline'; s.textContent = text; return s; }
 function msg(html) { const s = document.createElement('div'); s.className = 'overlay-msg'; s.innerHTML = html; return s; }
 function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 let toastTimer;
 function toast(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 3000); }
+
+// ---- invite links (?room=CODE) ----
+// A shared link prefills the room code so joining is one tap — no reading a
+// code out of a text thread. If the link names a different room than the one
+// we remember, the link wins (drop the memory so auto-rejoin doesn't fight it).
+const urlRoom = (new URLSearchParams(location.search).get('room') || '')
+  .toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+if (urlRoom) {
+  if (localStorage.getItem(ROOM_KEY) !== urlRoom) localStorage.removeItem(ROOM_KEY);
+  $('codeInput').value = urlRoom;
+  $('nameInput').focus();
+  toast(`Yer invited to pond ${urlRoom} — pick a name (or don't) and tap Join!`);
+}
 
 initAudio();
 syncSoundUI();

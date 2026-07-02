@@ -219,7 +219,8 @@ function checkWin(state, player) {
   state.winnerId = player.id;
   state.phase = 'GAME_OVER';
   logMsg(state, `${player.name} reached ${score(player)} and is crowned THE GREAT HONKEROR!`, 'win');
-  emitFx(state, 'WIN', { actor: player.name });
+  // actorId lets the client pick win/lose sounds by seat id (names can collide).
+  emitFx(state, 'WIN', { actor: player.name, actorId: player.id });
   return true;
 }
 
@@ -227,17 +228,20 @@ function checkWin(state, player) {
 // These bypass normal turn rules; the server gates them to the host. They keep
 // a game moving when someone disconnects or stalls.
 
-export function skipTurn(state) {
+// opts.auto = the server skipped an away player automatically (vs. the host
+// pressing skip) — only changes the log wording.
+export function skipTurn(state, opts = {}) {
   if (state.phase === 'GAME_OVER') return state;
+  const why = opts.auto ? 'away too long' : 'skipped by the host';
   if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
     // Stuck on a threat response — resolve it as "take the hit" and move on.
     const target = findPlayer(state, state.pending.target);
-    if (target) discardRegularHand(state, target, 'their turn was skipped');
-    logMsg(state, `${target ? target.name : 'A goose'}'s response was skipped.`, 'bad');
+    if (target) discardRegularHand(state, target, `their response was skipped (${why})`);
+    logMsg(state, `${target ? target.name : 'A goose'}'s response was skipped (${why}).`, 'bad');
     finishThreat(state);
     return state;
   }
-  logMsg(state, `${activePlayer(state).name}'s turn was skipped by the host.`, 'bad');
+  logMsg(state, `${activePlayer(state).name}'s turn was skipped (${why}).`, 'bad');
   endTurn(state);
   return state;
 }
@@ -383,10 +387,14 @@ function trade(state, action) {
 
 function lawnMower(state, action) {
   const p = activePlayer(state);
-  const card = takeWildFromHand(p, 'LAWN_MOWER');
-  if (!card) return err(state, "You don't have a Lawn Mower.");
+  // Validate the target BEFORE taking the card from the hand — erroring after
+  // the splice would silently destroy the Lawn Mower.
   const target = findPlayer(state, action.targetId);
   if (!target) return err(state, 'Pick a valid target.');
+  if (target.id === p.id) return err(state, "You can't mow your own gaggle.");
+  if (target.removed) return err(state, "They've already left the pond — pick a goose who's still in.");
+  const card = takeWildFromHand(p, 'LAWN_MOWER');
+  if (!card) return err(state, "You don't have a Lawn Mower.");
   state.wildDiscard.push(card);
   logMsg(state, `${p.name} fired up the LAWN MOWER at ${target.name}! Unblockable!`, 'bad');
   emitFx(state, 'LAWN_MOWER', { actor: p.name, target: target.name });
@@ -397,7 +405,14 @@ function lawnMower(state, action) {
 function draw(state) {
   const p = activePlayer(state);
   const card = drawGoose(state);
-  if (!card) return err(state, 'No goose cards left to draw.');
+  if (!card) {
+    // Draw + discard both empty (every card is in a hand). Drawing is the only
+    // turn-ending action, so erroring here would strand the player with no
+    // legal move — pass the turn instead.
+    logMsg(state, `The pond is out of goose cards — ${p.name}'s turn passes.`, 'bad');
+    endTurn(state);
+    return { state };
+  }
 
   if (card.kind === 'BIG_BOY') {
     state.bigBoyCard = card;
@@ -447,15 +462,18 @@ function respond(state, action) {
   }
 
   if (resp === 'get_goosed') {
-    // From BIG_BOY: only the original drawer may Get Goosed.
-    if (state.phase === 'AWAIT_BIG_BOY' && pending.target !== pending.origin) {
-      return err(state, 'Get Goosed can only be played by whoever drew the Big Boy.');
-    }
-    const card = takeWildFromHand(target, 'GET_GOOSED');
-    if (!card) return err(state, "You don't have a Get Goosed.");
+    // Hot potato rule: whoever Big Boy is sent at — the drawer OR a diverted
+    // victim — may play their own Get Goosed to send him on. Each divert burns
+    // a card (only 3 exist), so the chain always ends. You can bounce him
+    // right back at whoever sent him, but never at yourself.
+    // Validate the divert target BEFORE taking the card from the hand —
+    // erroring after the splice would silently destroy the Get Goosed.
     const next = findPlayer(state, action.targetId);
     if (!next) return err(state, 'Pick a player to divert Big Boy onto.');
     if (next.id === target.id) return err(state, "You can't Get Goosed yourself.");
+    if (next.removed) return err(state, "They've left the pond — pick a goose who's still in.");
+    const card = takeWildFromHand(target, 'GET_GOOSED');
+    if (!card) return err(state, "You don't have a Get Goosed.");
     state.wildDiscard.push(card);
     state.pending = { type: 'GET_GOOSED', target: next.id, origin: pending.origin };
     state.phase = 'AWAIT_GET_GOOSED';

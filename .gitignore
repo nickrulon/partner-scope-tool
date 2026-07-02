@@ -6,3 +6,6 @@ client/dist/
 server/scope-tool.db
 server/uploads/
 server/outputs/
+
+# macOS Finder metadata
+.DS_Store

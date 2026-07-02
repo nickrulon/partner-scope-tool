@@ -10,10 +10,12 @@ export const CARD_META = {
   BIG_BOY: { name: 'Big Boy',          points: 0, deck: 'goose', count: 10, color: '#7a2e2e', desc: 'Scares away all your regular geese — discard your whole regular hand (or stop it).' },
 
   // --- Wild Goose deck (one-time use, never reshuffles) ---
-  UNGOOSABLE:     { name: 'Ungoosable Goose', points: 1, deck: 'wild', count: 15, color: '#3a6ea5', desc: 'Unflappable. Does nothing but stand thyur — 1 steady point.' },
+  // Mix rebalanced 15/3/3/1 → 12/3/5/2 (still 22): fewer dud pulls, more
+  // hot-potato diverts, a second mower — Gang stays at 3 so Big Boy stays scary.
+  UNGOOSABLE:     { name: 'Ungoosable Goose', points: 1, deck: 'wild', count: 12, color: '#3a6ea5', desc: 'Unflappable. Does nothing but stand thyur — 1 steady point.' },
   GOOSE_GANG:     { name: 'Goose Gang',       points: 1, deck: 'wild', count: 3,  color: '#b8860b', desc: 'Play to block a Big Boy or Get Goosed. HONK, HONK, SON!' },
-  GET_GOOSED:     { name: 'Get Goosed',       points: 1, deck: 'wild', count: 3,  color: '#8b5a2b', desc: 'Only when YOU draw a Big Boy: divert it onto another player.' },
-  LAWN_MOWER:     { name: 'Lawn Mower',        points: 1, deck: 'wild', count: 1,  color: '#a0522d', desc: 'On your turn, force any player to discard their whole regular hand. Unblockable.' },
+  GET_GOOSED:     { name: 'Get Goosed',       points: 1, deck: 'wild', count: 5,  color: '#8b5a2b', desc: 'When Big Boy comes for you — drawn or diverted — send him at another goose instead. Hot potato!' },
+  LAWN_MOWER:     { name: 'Lawn Mower',        points: 1, deck: 'wild', count: 2,  color: '#a0522d', desc: 'On your turn, force any player to discard their whole regular hand. Unblockable.' },
   GREAT_HONKEROR: { name: 'The Great Honkeror',points: 2, deck: 'wild', count: 1,  color: '#6a0dad', desc: 'Champion bonus — worth 2 points. Held by the reigning winner.' },
 };
 

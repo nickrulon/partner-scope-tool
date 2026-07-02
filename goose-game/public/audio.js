@@ -17,9 +17,22 @@ const SOUND_NAMES = [
   'click', 'drawgoose', 'drawgeese', 'drawgeeses', 'honk', 'bigboy',
   'lawnmower', 'getgoosed', 'goosegang', 'turn', 'win', 'lose',
   'trade', 'announce', 'goosed', 'goosednoannounce',
-  'holler1', 'holler2', 'holler3', 'holler4', 'holler5', 'holler6',
+  'holler1', 'holler', 'holler2',
 ];
 const EXTS = ['mp3', 'ogg', 'wav', 'm4a'];
+
+// Sounds with no file of their own borrow an existing clip, so key moments are
+// never silent (losers hearing nothing on a win was the worst offender).
+// Drop a real <name>.<ext> into sounds/ any time and it wins over the alias.
+const ALIAS = {
+  drawgeese: 'drawgoose',          // 2-pt draw honks like a 1-pt until it gets its own clip
+  drawgeeses: 'drawgoose',
+  lose: 'goosed',                  // sad honk for the non-winners
+  goosednoannounce: 'goosed',      // the 21-without-announcing penalty
+  trade: 'click',                  // public "someone hit the Wild Market" tick
+  announce: 'holler2',             // "I'M BOUTA GOOSE!" gets a holler
+  holler: 'holler2',               // Holler button placeholder until sounds/holler.<ext> exists
+};
 
 let muted = localStorage.getItem('goose_muted') === '1';
 let volume = parseFloat(localStorage.getItem('goose_vol') ?? '0.7');
@@ -53,6 +66,12 @@ function loadBuffer(name) {
         buffers[name] = buf;
         return buf;
       } catch { /* missing or undecodable in this format — try the next ext */ }
+    }
+    // No file in any format — fall back to the alias clip if one is mapped.
+    if (ALIAS[name]) {
+      const buf = await loadBuffer(ALIAS[name]);
+      buffers[name] = buf;
+      return buf;
     }
     buffers[name] = null;
     return null;

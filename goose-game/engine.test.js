@@ -341,6 +341,73 @@ console.log('\n== Winner hand is revealed to everyone at game over ==');
   ok(bView.score >= 21, 'opponent B can see the winner\'s score at game over');
 }
 
+console.log('\n== Get Goosed hot potato: a diverted victim may re-divert ==');
+{
+  const g = createGame(p('A', 'B', 'C'), { firstSeat: 0, seed: 61 });
+  giveWild(g, 'A', 'GET_GOOSED');
+  giveWild(g, 'B', 'GET_GOOSED');
+  g.players[2].regular = [{ id: 'c1', kind: 'GEESE' }];
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  applyAction(g, 'A', { type: 'RESPOND', response: 'get_goosed', targetId: 'B' });
+  const r = applyAction(g, 'B', { type: 'RESPOND', response: 'get_goosed', targetId: 'C' });
+  ok(!r.error, 'B (diverted, not the drawer) may send Big Boy on to C');
+  eq(g.pending.target, 'C', 'Big Boy is now after C');
+  applyAction(g, 'C', { type: 'RESPOND', response: 'absorb' });
+  eq(g.players[2].regular.length, 0, 'C took the hit at the end of the chain');
+  eq(g.players[g.turnIndex].id, 'B', 'turn advanced past the original drawer A');
+}
+
+console.log('\n== Get Goosed cannot target a removed player ==');
+{
+  const g = createGame(p('A', 'B', 'C'), { firstSeat: 0, seed: 62 });
+  giveWild(g, 'A', 'GET_GOOSED');
+  removePlayer(g, 'C');
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  const r = applyAction(g, 'A', { type: 'RESPOND', response: 'get_goosed', targetId: 'C' });
+  ok(!!r.error, 'diverting onto a removed goose is rejected');
+  eq(g.players[0].wild.length, 1, 'the Get Goosed card was NOT burned by the failed divert');
+  eq(g.phase, 'AWAIT_BIG_BOY', 'A still owes a response');
+}
+
+console.log('\n== Lawn Mower: no self-mow, no removed targets, card survives bad input ==');
+{
+  const g = createGame(p('A', 'B', 'C'), { firstSeat: 0, seed: 63 });
+  giveWild(g, 'A', 'LAWN_MOWER');
+  removePlayer(g, 'C');
+  const self = applyAction(g, 'A', { type: 'PLAY_LAWN_MOWER', targetId: 'A' });
+  ok(!!self.error, 'mowing yourself is rejected');
+  const gone = applyAction(g, 'A', { type: 'PLAY_LAWN_MOWER', targetId: 'C' });
+  ok(!!gone.error, 'mowing a removed goose is rejected');
+  const ghost = applyAction(g, 'A', { type: 'PLAY_LAWN_MOWER', targetId: 'nobody' });
+  ok(!!ghost.error, 'mowing an unknown target is rejected');
+  eq(g.players[0].wild.length, 1, 'the Lawn Mower was NOT burned by the failed plays');
+  const okMow = applyAction(g, 'A', { type: 'PLAY_LAWN_MOWER', targetId: 'B' });
+  ok(!okMow.error, 'a valid mow still works');
+}
+
+console.log('\n== Empty deck + discard: the turn passes instead of stranding you ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 64 });
+  g.players[1].regular = [...g.gooseDraw];   // every card is in a hand
+  g.gooseDraw = []; g.gooseDiscard = [];
+  const r = applyAction(g, 'A', { type: 'DRAW' });
+  ok(!r.error, 'the dry draw is not an error');
+  eq(g.players[g.turnIndex].id, 'B', 'the turn passed to B');
+  eq(g.phase, 'PRE_DRAW', 'back to a normal turn');
+}
+
+console.log('\n== WIN fx carries the winner\'s id ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 65, boutaGooseRule: false });
+  g.players[0].regular = Array.from({ length: 5 }, (_, i) => ({ id: `g${i}`, kind: 'GEESES' })); // 20
+  stackGoose(g, ['GOOSE']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  const fx = redact(g, 'B').fx.find((f) => f.type === 'WIN');
+  ok(fx && fx.actorId === 'A', 'WIN fx includes actorId (sound picked by id, not name)');
+}
+
 console.log('\n== Defending champion starts with Great Honkeror (+2) ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 11, honkerorHolderId: 'A' });

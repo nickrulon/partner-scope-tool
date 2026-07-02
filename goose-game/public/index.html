@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Quit Goosin' Around!</title>
+  <meta name="description" content="A silly multiplayer card game about some geese taking back their pond from one bad little boy. Grab a code and join the pond!" />
+  <meta property="og:title" content="Quit Goosin' Around!" />
+  <meta property="og:description" content="A silly multiplayer card game about some geese taking back their pond. Join the pond!" />
+  <!-- favicons: per-mode in Chrome/Firefox/Edge; Safari ignores media and takes the fallback -->
+  <link rel="icon" media="(prefers-color-scheme: light)" href="favicon-light.png" />
+  <link rel="icon" media="(prefers-color-scheme: dark)" href="favicon-dark.png" />
+  <link rel="icon" href="favicon-light.png" />
+  <link rel="apple-touch-icon" href="favicon-light.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Rye&family=Special+Elite&family=VT323&display=swap" rel="stylesheet" />
@@ -39,6 +47,7 @@
       <p class="tag">Share the code and vote for the silliest goose.</p>
       <div class="paper lobby-card">
         <div class="codepill">Room <strong id="roomCode"></strong></div>
+        <button id="copyLinkBtn" class="btn block copy-link-btn">Copy Invite Link</button>
         <div id="decidedMsg" class="decided hidden"></div>
 
         <!-- startin' rules callout -->
@@ -54,6 +63,7 @@
 
         <div id="voteStatus" class="vote-status"></div>
         <div id="voteList" class="vote-list"></div>
+        <div id="lobbyWatchers" class="watchers lobby-watchers hidden"></div>
 
         <div id="hostControls" class="host-controls hidden">
           <button id="addBotBtn" class="btn block">+ Add a Computer Goose</button>
@@ -101,6 +111,8 @@
         </div>
 
         <div id="players" class="players"></div>
+        <!-- who's watching from the bank — only shows when someone is -->
+        <div id="watchers" class="watchers hidden"></div>
 
         <div class="myhand paper">
           <div class="myhand-head">
