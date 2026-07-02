@@ -99,9 +99,90 @@ function roomView(room, viewerId, asSpectator = false) {
     members: [...room.members.values()].map((m) => ({
       id: m.playerId, name: m.name, connected: isConnected(m), isBot: !!m.isBot,
     })),
+    // Shared table graffiti: crayon strokes anchored to UI zones, visible to
+    // everyone (spectators included).
+    pond: room.pond || [],
     // viewerId is the spectator's own (non-player) id, so nothing private leaks.
     game: room.game ? redact(room.game, viewerId) : null,
   };
+}
+
+// --- Pond graffiti ---------------------------------------------------------
+// Doodles on the table itself (not on cards): strokes anchored to a UI zone
+// ('play', 'topbar', 'decks', 'myhand', or 'player:<id>') with coords
+// normalized 0..1000 to that zone's box, so every client renders them onto
+// the same UI element regardless of screen size or layout. Room-level (not
+// game state) so the graffiti survives rematches; the host can wipe it.
+// 'waitcard' = the big paper card in the waiting room — doodling starts
+// before the game does.
+const POND_ZONES = new Set(['play', 'topbar', 'decks', 'myhand', 'waitcard']);
+const POND_MAX_STROKES = 250;      // oldest graffiti fades away
+const POND_MAX_POINTS = 1200;      // per stroke
+
+function pondSanitize(room, stroke) {
+  const s = stroke || {};
+  const zone = String(s.z || '');
+  const zoneOk = POND_ZONES.has(zone)
+    || (zone.startsWith('player:') && !!room.game && room.game.players.some((p) => `player:${p.id}` === zone));
+  if (!zoneOk || !Array.isArray(s.p)) return null;
+  const c = Math.min(7, Math.max(0, s.c | 0));   // 8-color palette (incl. white)
+  const w = Math.min(2, Math.max(0, s.w | 0));
+  const p = [];
+  for (let i = 0; i + 1 < s.p.length && p.length / 2 < POND_MAX_POINTS; i += 2) {
+    const x = Math.round(+s.p[i]), y = Math.round(+s.p[i + 1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    p.push(Math.min(1000, Math.max(0, x)), Math.min(1000, Math.max(0, y)));
+  }
+  if (p.length < 4) return null;
+  return { z: zone, c, w, p };
+}
+
+// Relay a lightweight live-drawing event to everyone EXCEPT the artist —
+// no room state involved, so mid-stroke streaming stays cheap.
+function pondRelay(room, exceptPid, payload) {
+  for (const m of room.members.values()) {
+    if (m.isBot || m.playerId === exceptPid) continue;
+    send(m.ws, 'pondlive', payload);
+  }
+  for (const s of room.spectators.values()) send(s.ws, 'pondlive', payload);
+}
+
+function doPond(ws, { op, stroke, ids }) {
+  const room = getRoom(ws.meta.roomCode);
+  if (!room || ws.meta.isSpectator) return;   // players only (waiting room OR in-game)
+  const pid = ws.meta.playerId;
+  if (!room.members.has(pid)) return;
+  room.pond = room.pond || [];
+  if (op === 'live') {
+    // In-progress stroke preview: relay only, never stored. An invalid/empty
+    // stroke means "preview over" (e.g. the artist bailed on a tiny stroke).
+    const live = pondSanitize(room, stroke);
+    pondRelay(room, pid, live ? { by: pid, stroke: live } : { by: pid, done: true });
+    return;   // no broadcast — this is the whole point
+  }
+  if (op === 'clear') {
+    if (pid !== room.hostId) return send(ws, 'error', { message: 'Only the host can hose down the pond.' });
+    room.pond = [];
+  } else if (op === 'undo') {
+    // Remove the caller's own most recent mark only.
+    for (let i = room.pond.length - 1; i >= 0; i--) {
+      if (room.pond[i].by === pid) { room.pond.splice(i, 1); break; }
+    }
+  } else if (op === 'erase') {
+    // The eraser rubs out whole strokes by id — anyone can erase anything
+    // (same social contract as doodling over it).
+    if (!Array.isArray(ids)) return;
+    const kill = new Set(ids.slice(0, 64).map((n) => n | 0));
+    room.pond = room.pond.filter((s) => !kill.has(s.i));
+  } else if (op === 'stroke') {
+    const clean = pondSanitize(room, stroke);
+    if (!clean) return;
+    room.pondSeq = (room.pondSeq || 0) + 1;
+    room.pond.push({ i: room.pondSeq, ...clean, by: pid });
+    if (room.pond.length > POND_MAX_STROKES) room.pond.shift();
+    pondRelay(room, pid, { by: pid, done: true });   // drop everyone's preview of this stroke
+  } else return;
+  broadcast(room);
 }
 
 function send(ws, type, payload) {
@@ -229,6 +310,7 @@ function handle(ws, type, payload) {
     case 'kick':      return doKick(ws, payload);
     case 'leave':     return doLeave(ws, payload);
     case 'nudge':     return doNudge(ws, payload);
+    case 'pond':      return doPond(ws, payload);
     case 'rematch':   return doRematch(ws, payload);
     case 'chat':      return doChat(ws, payload);
     default: send(ws, 'error', { message: `unknown message ${type}` });

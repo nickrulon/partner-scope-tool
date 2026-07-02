@@ -122,6 +122,12 @@ function connect() {
       }
     }
     else if (type === 'nudge') { nudgeBanner(payload.text); playSound(payload.kind); }
+    else if (type === 'pondlive') {
+      // Someone else's crayon, mid-stroke: paint it as it happens.
+      if (payload.done) delete pondLive[payload.by];
+      else pondLive[payload.by] = { ...payload.stroke, t: Date.now() };
+      renderPond();
+    }
   };
   ws.onclose = () => { toast('Disconnected — reconnecting…'); setTimeout(connect, 1500); };
 }
@@ -147,6 +153,7 @@ $('backBtn').onclick = () => {
   localStorage.removeItem(ROOM_KEY);
   view = null; spectating = false;
   document.body.classList.remove('spectating');
+  setPondMode(false); $('pondBtn').classList.add('hidden');
   showScreen('lobby');
 };
 $('startBtn').onclick = () => { playSound('click'); sendWs('start'); };
@@ -216,6 +223,7 @@ $('leaveBtn').onclick = () => {
   localStorage.removeItem(ROOM_KEY);   // don't auto-rejoin
   view = null; spectating = false;
   document.body.classList.remove('spectating');
+  setPondMode(false); $('pondBtn').classList.add('hidden');
   showScreen('lobby');
 };
 $('soundToggle').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isMuted()) playSound('click'); };
@@ -233,7 +241,9 @@ function render() {
   document.body.classList.toggle('spectating', spectating);
   rememberSession();
   if (!view.code) { resetTransient(); showScreen('lobby'); return; }
-  if (!view.game) { resetTransient(); renderWaiting(); showScreen('waiting'); return; }
+  // keepPond: waiting-room re-renders (votes etc.) must not kick you out of
+  // marker mode — doodling works in the waiting room too.
+  if (!view.game) { resetTransient({ keepPond: true }); renderWaiting(); showScreen('waiting'); return; }
   renderGame();
   showScreen('game');
 }
@@ -244,7 +254,7 @@ function render() {
 // Also re-arms the fx feed so the next game's effects (which restart their id
 // counter at 1) aren't filtered out as "already seen" — that was why the
 // losing sound went quiet after a rematch.
-function resetTransient() {
+function resetTransient(opts = {}) {
   $('overlay').classList.add('hidden');
   $('overlay').classList.remove('win');
   $('flyLayer').innerHTML = '';
@@ -253,6 +263,9 @@ function resetTransient() {
   winDismissed = false; laneBusy = false;
   tradeMode = false; tradeSel.clear(); targetMode = null; goosedChoosing = false;
   fxPrimed = false; lastFxId = 0;
+  if (!opts.keepPond) { setPondMode(false); $('pondBtn').classList.add('hidden'); }
+  document.body.classList.remove('my-turn');
+  syncDoodleSurface();
   // Log & Chat sheet only exists in-game.
   $('specPanelToggle').classList.add('hidden');
   document.body.classList.remove('spec-panels-open');
@@ -327,6 +340,10 @@ function renderWaiting() {
   else status.textContent = `${votedCount}/${total} voted`;
   status.className = 'vote-status' + (decided ? ' good' : (allVoted ? ' split' : ''));
 
+  // Doodling starts in the waiting room — same crayon, shared with the pond.
+  $('pondBtn').classList.toggle('hidden', spectating);
+  renderPond();
+
   // Spectators just watch.
   if (spectating) {
     $('startHint').textContent = '';
@@ -389,6 +406,15 @@ function renderGame() {
   renderOverlay();
   handleFx();
   syncSoundUI();
+  $('pondBtn').classList.toggle('hidden', spectating);
+  // While doodling, the action bar floats above the capture layer — this class
+  // also nudges the crayon toolbar up so the two never overlap.
+  document.body.classList.toggle('has-actions', $('stageActions').children.length > 0);
+  // Your-turn flag: with any doodle surface open, this lifts the action
+  // buttons above it and shows the "yer turn" chip.
+  document.body.classList.toggle('my-turn', !spectating && g.phase !== 'GAME_OVER' && isMyTurn());
+  syncDoodleSurface();
+  renderPond();
 }
 
 function renderTurnBanner() {
@@ -467,6 +493,7 @@ function renderPlayers() {
     }
     box.appendChild(el);
   }
+  renderPond();   // player panels were rebuilt — restore their graffiti
 }
 
 // Build a gaggle card: the card + its name caption, click-to-name when
@@ -552,21 +579,24 @@ function renderControls() {
     const confirm = btn('Trade for a Wild', 'btn-primary', doTrade);
     confirm.disabled = total !== 4 || g.wildDrawCount === 0;
     c.appendChild(confirm);
-    c.appendChild(btn('Cancel', 'btn-ghost', () => { tradeMode = false; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); }));
+    c.appendChild(btn('Cancel', 'btn-ghost', () => { tradeMode = false; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); resumePond(); }));
     return;
   }
 
   // (Announcing "I'm bouta goose" now happens via a prompt AFTER you draw into
   // 17+, not as a pre-draw action — see the AWAIT_ANNOUNCE overlay.)
-  const tradeBtn = btn('Trade in Wild Goose Market', '', () => { tradeMode = true; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); });
+  // Trading needs the table (tap geese in the center) — suspend marker mode
+  // for the transaction; it resumes when the trade lands or is cancelled.
+  const tradeBtn = btn('Trade in Wild Goose Market', '', () => { suspendPond(); closeDoodleModals(); tradeMode = true; tradeSel.clear(); laneBusy = false; clearTimeout(laneTimer); renderMine(); renderControls(); renderPlayArea(); });
   tradeBtn.disabled = g.wildDrawCount === 0 || p.regular.length === 0;
   c.appendChild(tradeBtn);
   if ((p.wild || []).some((w) => w.kind === 'LAWN_MOWER')) {
-    c.appendChild(btn('Play Lawn Mower', '', () => beginLawnTarget()));
+    // Same deal: picking a mow target means clicking a player panel.
+    c.appendChild(btn('Play Lawn Mower', '', () => { suspendPond(); closeDoodleModals(); beginLawnTarget(); }));
   }
   c.appendChild(btn('Draw a Goose Card  (ends turn)', 'btn-primary', () => sendWs('action', { action: { type: 'DRAW' } }), { seqClick: true }));
 }
-function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tradeSel] } }); tradeMode = false; tradeSel.clear(); }
+function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tradeSel] } }); tradeMode = false; tradeSel.clear(); resumePond(); }
 
 // ---- name your geese ----
 // Goose holds 1 name, Geese 2, Geeses 4. Names persist on the card object, so
@@ -629,8 +659,8 @@ function openNameModal(cardId, onClose) {
 // (no shimmering) while still looking hand-waxed.
 // Palette: black, orange (game bill), red (game bad), green (game good),
 // blue, brown, yellow. Weights: light / medium / bold — default medium black.
-const DOODLE_COLORS = ['#2a2118', '#e07a2e', '#b23b2e', '#5d8a3a', '#3a6ea5', '#7a4a26', '#d9a62e'];
-const DOODLE_COLOR_NAMES = ['black', 'orange', 'red', 'green', 'blue', 'brown', 'yellow'];
+const DOODLE_COLORS = ['#2a2118', '#e07a2e', '#b23b2e', '#5d8a3a', '#3a6ea5', '#7a4a26', '#d9a62e', '#fdfdf8'];
+const DOODLE_COLOR_NAMES = ['black', 'orange', 'red', 'green', 'blue', 'brown', 'yellow', 'white'];
 const BRUSH_R = [7, 12, 20];           // stroke radius at a 600px-wide card
 const DOODLE_MAX_POINTS = 1500;        // matches the engine's cap
 
@@ -708,6 +738,22 @@ function doodleLayer(doodle, res = 300) {
   cv.height = Math.round(res * 4 / 3);
   paintDoodle(cv.getContext('2d'), doodle, cv.width, cv.height);
   return cv;
+}
+
+// Body-level flag: SOME doodle surface is open (pond marker mode or a card
+// editor). While it's on AND it's your turn, the action buttons float above
+// the doodle UI with a "yer turn" chip so the table never waits on an artist.
+function syncDoodleSurface() {
+  document.body.classList.toggle('doodling-surface', pondMode || !!document.querySelector('.doodle-modal'));
+}
+
+// Force-close any open card-doodle editors, SAVING their strokes first — used
+// when a turn action (trade, mow) needs the table back. Art is never lost.
+function closeDoodleModals() {
+  document.querySelectorAll('.doodle-modal').forEach((w) => {
+    if (w.__forceClose) w.__forceClose(); else w.remove();
+  });
+  syncDoodleSurface();
 }
 
 // The doodle editor: big card face, crayon canvas on top, palette + weights.
@@ -816,23 +862,260 @@ function openDoodleModal(cardId, onClose) {
   cv.addEventListener('pointercancel', endStroke);
 
   // --- actions ---
-  const done = () => { wrap.remove(); onClose && onClose(); };
+  const done = () => { wrap.remove(); syncDoodleSurface(); onClose && onClose(); };
+  const save = () => { sendWs('action', { action: { type: 'DOODLE_GOOSE', cardId, strokes } }); done(); };
+  wrap.__forceClose = save;   // turn actions save-and-close rather than discard
   const row = document.createElement('div');
   row.className = 'dd-actions';
-  row.appendChild(btn('Save doodle', 'btn-primary', () => {
-    sendWs('action', { action: { type: 'DOODLE_GOOSE', cardId, strokes } });
-    done();
-  }));
+  row.appendChild(btn('Save doodle', 'btn-primary', save));
   row.appendChild(btn('Cancel', 'btn-ghost', done));
   box.appendChild(row);
   wrap.appendChild(box);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
   document.body.appendChild(wrap);
+  syncDoodleSurface();
 }
+
+// ---- pond graffiti: doodle the table itself ----
+// Shared crayon marks over the game UI. Each stroke is anchored to a ZONE
+// (the play area, the top bar, the deck row, your-gaggle box, or a player
+// panel) with zone-normalized coords — so a mustache on Honkleberry's panel
+// lands on Honkleberry's panel on every screen, desktop or phone. Strokes
+// render on canvases that sit BEHIND text and buttons (text also gets a halo
+// buffer), so the table gets marked up without ever becoming unusable.
+let pondMode = false, pondColor = 0, pondWeight = 1, pondCur = null;
+// Set when a turn action (trade, lawn mower) needs the table back — marker
+// mode suspends for the transaction and resumes right after.
+let pondResume = false;
+// Eraser tool: rubs out whole strokes it touches (anyone's — same social
+// contract as doodling over someone's art).
+let pondErase = false;
+const erasePending = new Set();   // optimistic local hides until the server confirms
+let eraseBatch = new Set(), eraseTimer = null;
+// Other players' in-progress strokes (streamed live), keyed by player id.
+const pondLive = {};
+let pondLiveLastSent = 0;
+
+// Doodling works on the game table AND in the waiting room.
+function doodleScreen() {
+  if (!$('game').classList.contains('hidden')) return 'game';
+  if (!$('waiting').classList.contains('hidden')) return 'waiting';
+  return null;
+}
+
+function pondZoneEls() {
+  const out = [];
+  const add = (z, el) => { if (el) out.push([z, el]); };
+  const screen = doodleScreen();
+  if (screen === 'game') {
+    add('play', $('playArea'));
+    add('topbar', document.querySelector('#game .topbar'));
+    add('decks', document.querySelector('.decks'));
+    add('myhand', document.querySelector('.myhand'));
+    document.querySelectorAll('#players .player').forEach((p) => add('player:' + p.dataset.pid, p));
+  } else if (screen === 'waiting') {
+    add('waitcard', document.querySelector('#waiting .lobby-card'));
+  }
+  return out;
+}
+
+function pondCanvasFor(el) {
+  let cv = el.querySelector(':scope > .pond-layer');
+  const w = el.clientWidth, h = el.clientHeight;
+  if (!w || !h) return null;
+  if (!cv) { cv = document.createElement('canvas'); cv.className = 'pond-layer'; el.prepend(cv); }
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  return cv;
+}
+
+// (Re)paint every zone's shared strokes — the stored pond plus everyone's
+// live in-progress strokes, minus anything the eraser has claimed. Cheap and
+// idempotent — called after any render that rebuilds a zone's DOM.
+function renderPond() {
+  if (!view || !view.code || !doodleScreen()) return;
+  // Drop optimistic erases the server has confirmed, and stale live previews.
+  const stored = (view.pond || []);
+  for (const id of [...erasePending]) if (!stored.some((s) => s.i === id)) erasePending.delete(id);
+  const now = Date.now();
+  for (const [by, s] of Object.entries(pondLive)) if (now - s.t > 6000) delete pondLive[by];
+  const byZone = {};
+  stored.forEach((s) => { if (!erasePending.has(s.i)) (byZone[s.z] = byZone[s.z] || []).push(s); });
+  Object.values(pondLive).forEach((s) => { (byZone[s.z] = byZone[s.z] || []).push(s); });
+  for (const [zone, el] of pondZoneEls()) {
+    const strokes = byZone[zone];
+    const existing = el.querySelector(':scope > .pond-layer');
+    if (!strokes || !strokes.length) { if (existing && !pondCur) existing.remove(); continue; }
+    const cv = pondCanvasFor(el);
+    if (!cv) continue;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    paintDoodle(ctx, strokes, cv.width, cv.height);
+  }
+}
+
+// --- marker mode (capture layer + floating toolbar) ---
+function zoneAt(x, y) {
+  for (const [z, el] of pondZoneEls()) {
+    const r = el.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return { z, el, r };
+  }
+  return null;
+}
+const pondXY = (e, r) => [
+  Math.round(Math.min(1000, Math.max(0, (e.clientX - r.left) / r.width * 1000))),
+  Math.round(Math.min(1000, Math.max(0, (e.clientY - r.top) / r.height * 1000))),
+];
+
+function setPondMode(on) {
+  pondMode = on;
+  pondCur = null;
+  if (!on) pondResume = false;
+  document.body.classList.toggle('pond-mode', on);
+  $('pondCapture').classList.toggle('hidden', !on);
+  $('pondBar').classList.toggle('hidden', !on);
+  $('pondBtn').textContent = on ? "Done Doodlin'" : 'Doodle the Pond';
+  if (on) buildPondBar();
+  syncDoodleSurface();
+}
+
+// Turn actions that need the table back (trading, mow-targeting) park marker
+// mode here and pick it back up when the transaction settles. Drawing never
+// suspends — the reveal just floats above the capture layer.
+function suspendPond() {
+  if (!pondMode) return;
+  setPondMode(false);
+  pondResume = true;   // set AFTER setPondMode (which resets it)
+}
+function resumePond() {
+  if (!pondResume) return;
+  pondResume = false;
+  setPondMode(true);
+}
+
+function buildPondBar() {
+  const bar = $('pondBar');
+  bar.innerHTML = '';
+  const setErase = (on) => {
+    pondErase = on;
+    document.body.classList.toggle('pond-erasing', on);
+    bar.querySelector('.dd-eraser')?.classList.toggle('sel', on);
+  };
+  const colors = document.createElement('div');
+  colors.className = 'dd-colors';
+  DOODLE_COLORS.forEach((hex, i) => {
+    const b = document.createElement('button');
+    b.className = 'dd-swatch' + (i === pondColor && !pondErase ? ' sel' : '');
+    b.style.backgroundColor = hex;
+    b.title = DOODLE_COLOR_NAMES[i];
+    b.onclick = () => { setErase(false); pondColor = i; colors.querySelectorAll('.dd-swatch').forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    colors.appendChild(b);
+  });
+  bar.appendChild(colors);
+  const weights = document.createElement('div');
+  weights.className = 'dd-weights';
+  ['light', 'medium', 'bold'].forEach((label, i) => {
+    const b = document.createElement('button');
+    b.className = 'dd-weight' + (i === pondWeight ? ' sel' : '');
+    b.title = label;
+    const dot = document.createElement('span');
+    const px = [6, 10, 16][i];
+    dot.style.width = dot.style.height = px + 'px';
+    b.appendChild(dot);
+    b.onclick = () => { setErase(false); pondWeight = i; weights.querySelectorAll('.dd-weight').forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    weights.appendChild(b);
+  });
+  const eraser = btn('Eraser', 'btn-ghost dd-mini dd-eraser' + (pondErase ? ' sel' : ''), () => setErase(!pondErase));
+  weights.appendChild(eraser);
+  weights.appendChild(btn('Undo', 'btn-ghost dd-mini', () => sendWs('pond', { op: 'undo' })));
+  if (playerId === view?.hostId) weights.appendChild(btn('Clear pond', 'btn-ghost dd-mini', () => sendWs('pond', { op: 'clear' })));
+  weights.appendChild(btn('Done', 'btn-primary dd-mini', () => setPondMode(false)));
+  bar.appendChild(weights);
+}
+
+$('pondBtn').onclick = () => { playSound('click'); setPondMode(!pondMode); };
+
+// The eraser: rub over strokes to pick them off. Hits are hidden instantly
+// (optimistic) and batched to the server.
+function eraseAt(e) {
+  const hit = zoneAt(e.clientX, e.clientY);
+  if (!hit) return;
+  const [x, y] = pondXY(e, hit.r);
+  for (const s of (view.pond || [])) {
+    if (s.z !== hit.z || s.i == null || erasePending.has(s.i)) continue;
+    for (let i = 0; i + 1 < s.p.length; i += 2) {
+      if (Math.hypot(s.p[i] - x, s.p[i + 1] - y) < 55) {
+        erasePending.add(s.i);
+        eraseBatch.add(s.i);
+        break;
+      }
+    }
+  }
+  if (eraseBatch.size && !eraseTimer) {
+    eraseTimer = setTimeout(() => {
+      eraseTimer = null;
+      sendWs('pond', { op: 'erase', ids: [...eraseBatch] });
+      eraseBatch = new Set();
+    }, 150);
+  }
+  renderPond();
+}
+
+// Drawing on the capture layer: the stroke belongs to whichever zone it
+// STARTS over, and live-paints onto that zone's canvas as you drag —
+// streaming to everyone else's screens as it happens.
+(() => {
+  const cap = $('pondCapture');
+  const streamLive = () => {
+    const now = Date.now();
+    if (now - pondLiveLastSent < 100) return;   // ~10Hz is plenty for a crayon
+    pondLiveLastSent = now;
+    sendWs('pond', { op: 'live', stroke: { z: pondCur.zone, c: pondCur.s.c, w: pondCur.s.w, p: pondCur.s.p } });
+  };
+  cap.addEventListener('pointerdown', (e) => {
+    if (pondErase) { e.preventDefault(); try { cap.setPointerCapture(e.pointerId); } catch { /* synthetic */ } pondCur = { erasing: true }; eraseAt(e); return; }
+    const hit = zoneAt(e.clientX, e.clientY);
+    if (!hit) { toast(doodleScreen() === 'waiting' ? 'Doodle on the big paper card.' : 'Doodle on a box — the play table, decks, or a player panel.'); return; }
+    e.preventDefault();
+    try { cap.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    const [x, y] = pondXY(e, hit.r);
+    pondCur = { zone: hit.z, el: hit.el, r: hit.r, s: { c: pondColor, w: pondWeight, p: [x, y] } };
+    const cv = pondCanvasFor(hit.el);
+    if (cv) {
+      const brush = brushFor(pondColor, pondWeight, cv.width);
+      cv.getContext('2d').drawImage(brush, x / 1000 * cv.width - brush.width / 2, y / 1000 * cv.height - brush.width / 2);
+    }
+  });
+  cap.addEventListener('pointermove', (e) => {
+    if (!pondCur) return;
+    e.preventDefault();
+    if (pondCur.erasing) { eraseAt(e); return; }
+    const [x, y] = pondXY(e, pondCur.r);
+    const n = pondCur.s.p.length;
+    if (Math.hypot(x - pondCur.s.p[n - 2], y - pondCur.s.p[n - 1]) < 7) return;
+    if (n / 2 >= 1200) return;
+    pondCur.s.p.push(x, y);
+    const cv = pondCanvasFor(pondCur.el);
+    if (cv) stampSegment(cv.getContext('2d'), pondCur.s, pondCur.s.p.length - 2, cv.width, cv.height, 0, 0, Math.random);
+    streamLive();
+  });
+  const end = () => {
+    if (!pondCur) return;
+    const wasErasing = pondCur.erasing;
+    const { zone, s } = pondCur;
+    pondCur = null;
+    if (wasErasing) return;
+    if (s.p.length >= 4) sendWs('pond', { op: 'stroke', stroke: { z: zone, c: s.c, w: s.w, p: s.p } });
+    else { sendWs('pond', { op: 'live', stroke: null }); renderPond(); }   // tell others the preview is over
+  };
+  cap.addEventListener('pointerup', end);
+  cap.addEventListener('pointercancel', end);
+})();
+
+window.addEventListener('resize', () => renderPond());
 
 // ---- lawn-mower targeting (click a player panel) ----
 function beginLawnTarget() { targetMode = true; toast('Pick a target — click a player.'); renderPlayers(); }
-function chooseLawnTarget(targetId) { targetMode = false; sendWs('action', { action: { type: 'PLAY_LAWN_MOWER', targetId } }); renderPlayers(); }
+function chooseLawnTarget(targetId) { targetMode = false; sendWs('action', { action: { type: 'PLAY_LAWN_MOWER', targetId } }); renderPlayers(); resumePond(); }
 
 // ---- Big Boy / Win overlay ----
 // Spread the winner's whole gaggle (regular + wild) under the banner so the
@@ -1139,6 +1422,7 @@ function flashTurn() {
   laneBusy = true;
   clearTimeout(laneTimer);
   laneTimer = setTimeout(() => { laneBusy = false; renderPlayArea(); }, 1800);
+  renderPond();
 }
 
 function playerPanel(id) { return document.querySelector(`.player[data-pid="${id}"]`); }
@@ -1300,6 +1584,7 @@ function renderPlayArea() {
       <div class="pi-main">${esc(main)}</div>
       ${last ? `<div class="pi-sub">Last: ${esc(last)}</div>` : ''}
     </div>`;
+  renderPond();   // innerHTML wiped the zone canvas — put the graffiti back
 }
 
 // Trade pulls your tradeable geese into the center, big enough to pick from.
@@ -1333,6 +1618,7 @@ function renderTradeStage(pa) {
     }
     box.appendChild(slot);
   });
+  renderPond();
 }
 
 const EVENT_FLASH = {
@@ -1356,6 +1642,7 @@ function flashEvent(f) {
   clearTimeout(laneTimer);
   // Hold center messages on screen ≥3s so they're easy to read.
   laneTimer = setTimeout(() => { laneBusy = false; renderPlayArea(); }, 3200);
+  renderPond();
 }
 
 // ---- log / chat ----

@@ -35,7 +35,7 @@ function cleanDoodle(input) {
   let pts = 0;
   for (const s of input.slice(0, DOODLE_MAX_STROKES)) {
     if (!s || !Array.isArray(s.p)) continue;
-    const c = Math.min(6, Math.max(0, s.c | 0));
+    const c = Math.min(7, Math.max(0, s.c | 0));   // 8-color palette (incl. white)
     const w = Math.min(2, Math.max(0, s.w | 0));
     const p = [];
     for (let i = 0; i + 1 < s.p.length && pts < DOODLE_MAX_POINTS; i += 2) {

@@ -199,6 +199,53 @@ try {
     [...clients, w2].forEach((c) => c.close());
   }
 
+  console.log('\n== Pond graffiti: shared strokes, own-undo, host-only clear ==');
+  {
+    const { clients, host } = await makeRoom(['Quill', 'Rex']);
+    const rex = clients[1];
+    host.send('pond', { op: 'stroke', stroke: { z: 'play', c: 1, w: 2, p: [100, 100, 300, 300] } });
+    await rex.wait(isState((s) => (s.pond || []).length === 1), 'stroke broadcast to everyone');
+    ok(true, 'a pond stroke reaches the whole room');
+    host.send('pond', { op: 'stroke', stroke: { z: 'nonsense', c: 0, w: 0, p: [1, 1, 2, 2] } });
+    host.send('pond', { op: 'stroke', stroke: { z: 'player:' + rex.playerId, c: 2, w: 1, p: [50, 50, 200, 200] } });
+    await rex.wait(isState((s) => (s.pond || []).length === 2), 'player-zone stroke accepted');
+    ok(rex.lastState().pond.every((st) => st.z !== 'nonsense'), 'unknown zones are rejected');
+    // Rex's undo touches nothing (both marks are the host's); host undo removes one.
+    rex.send('pond', { op: 'undo' });
+    host.send('pond', { op: 'undo' });
+    await rex.wait(isState((s) => (s.pond || []).length === 1), 'one stroke undone');
+    ok(true, 'undo only removes your own most recent mark');
+    rex.send('pond', { op: 'clear' });
+    const err = await rex.wait((m) => m.type === 'error' && /host/i.test(m.payload.message), 'clear rejected');
+    ok(!!err, 'only the host can clear the pond');
+    host.send('pond', { op: 'clear' });
+    await rex.wait(isState((s) => (s.pond || []).length === 0), 'pond cleared');
+    ok(true, 'host clear wipes the graffiti');
+    // Live streaming: mid-stroke previews relay to everyone else, not the artist.
+    host.send('pond', { op: 'live', stroke: { z: 'play', c: 0, w: 1, p: [10, 10, 90, 90] } });
+    const live = await rex.wait((m) => m.type === 'pondlive' && m.payload.stroke, 'live preview relayed');
+    ok(live.payload.by === host.playerId && live.payload.stroke.z === 'play', 'others see the stroke as it is drawn');
+    host.send('pond', { op: 'stroke', stroke: { z: 'play', c: 0, w: 1, p: [10, 10, 90, 90] } });
+    const doneMsg = await rex.wait((m) => m.type === 'pondlive' && m.payload.done, 'preview cleared on commit');
+    ok(!!doneMsg, 'committing the stroke ends the live preview');
+    // Eraser: strokes have ids; erase removes them (any owner).
+    const st = await rex.wait(isState((s) => (s.pond || []).length === 1 && s.pond[0].i != null), 'stroke has an id');
+    ok(true, 'strokes carry ids for the eraser');
+    rex.send('pond', { op: 'erase', ids: [st.payload.pond[0].i] });
+    await rex.wait(isState((s) => (s.pond || []).length === 0), 'stroke erased');
+    ok(true, 'the eraser rubs out strokes by id (any owner)');
+    clients.forEach((c) => c.close());
+  }
+
+  console.log('\n== Waiting-room doodles (no game yet) ==');
+  {
+    const { clients, host } = await makeRoom(['Sal', 'Tug'], { start: false });
+    host.send('pond', { op: 'stroke', stroke: { z: 'waitcard', c: 7, w: 1, p: [100, 100, 400, 400] } });
+    await clients[1].wait(isState((s) => (s.pond || []).some((x) => x.z === 'waitcard' && x.c === 7)), 'waitcard stroke visible');
+    ok(true, 'doodling works in the waiting room (and white survives the clamp)');
+    clients.forEach((c) => c.close());
+  }
+
   console.log('\n== Empty rooms are reaped ==');
   {
     const { clients, code } = await makeRoom(['Mo', 'Nib'], { start: false });

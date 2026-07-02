@@ -293,7 +293,7 @@ console.log('\n== Doodles: own cards only, sanitized, clearable ==');
   applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: messy });
   const d = g.players[0].regular[0].doodle;
   ok(d.length <= 64, `stroke count capped at 64 (got ${d.length})`);
-  ok(d[0].c === 6 && d[0].w === 0, 'palette/weight indexes clamped');
+  ok(d[0].c === 7 && d[0].w === 0, 'palette/weight indexes clamped (8-color palette)');
   ok(Math.min(...d[0].p) >= 0 && Math.max(...d[0].p) <= 1000, 'coordinates clamped to 0..1000');
   applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: [] });
   ok(!g.players[0].regular[0].doodle, 'empty strokes clears the doodle');

@@ -377,6 +377,86 @@ input::placeholder { color: #9a8d6e; }
 .dd-mini { font-size: .78rem; padding: 6px 12px; color: var(--ink); border-color: var(--ink); }
 .dd-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 
+/* ---------- pond graffiti (doodle the table) ---------- */
+/* Zone canvases sit at z1; every real UI element in a zone is lifted to z2+
+   so text, cards, and buttons always paint ABOVE the crayon. */
+.pond-layer { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+#game .topbar, .decks, .myhand { position: relative; }
+.play-area > *:not(.pond-layer),
+#game .topbar > *:not(.pond-layer),
+.player > *:not(.pond-layer),
+.myhand > *:not(.pond-layer) { position: relative; z-index: 2; }
+/* deck piles are positioned boxes, so their zone canvas rides above the pile
+   art (z2) while the labels/counters step up to z3 */
+.decks > .pond-layer { z-index: 2; }
+.pile .pile-l, .pile .pile-n { z-index: 3; }
+/* the readability buffer: a soft halo behind table text so crayon underneath
+   never makes it hard to read */
+.player .pname, .player .pscore, .player .pmeta,
+.myhand-title, .myhand-hint,
+#game .topbar .brand, #game .topbar .room-strip {
+  text-shadow: 0 0 3px var(--cream), 0 0 6px var(--cream), 0 0 10px var(--cream);
+}
+.play-area .pi-main, .play-area .pi-sub {
+  text-shadow: 0 0 6px var(--pond-deep), 0 0 12px var(--pond-deep), 0 0 18px var(--pond-deep);
+}
+
+/* marker-mode toggle — bottom-LEFT above Leave Game, clear of the right
+   rail's volume slider */
+.pond-btn {
+  position: fixed; left: 14px; bottom: 64px; z-index: 111;
+  background: var(--cream); color: var(--ink); border-color: var(--paper-edge);
+  font-weight: bold; text-transform: uppercase; letter-spacing: .04em;
+  box-shadow: 0 4px 12px rgba(0,0,0,.5);
+}
+.pond-btn:hover { border-color: var(--bill); }
+body.pond-mode .pond-btn { background: var(--bill); color: #2a1500; border-color: var(--bill-dark); }
+/* full-screen crayon capture — sits UNDER threat/win overlays (z100+) so a
+   Big Boy response is never blocked by doodling */
+.pond-capture { position: fixed; inset: 0; z-index: 96; cursor: crosshair; touch-action: none; }
+/* floating toolbar */
+.pond-bar {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: 64px; z-index: 112;
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  padding: 10px 12px; max-width: 94vw;
+}
+@media (max-width: 1040px) {
+  .pond-bar { bottom: 106px; }
+  .pond-btn { left: 10px; bottom: 12px; }
+}
+/* eraser mode: swap the crosshair for a "rubbing" cursor + highlight */
+body.pond-erasing .pond-capture { cursor: cell; }
+.dd-eraser.sel { background: var(--bill); color: #2a1500; border-color: var(--bill-dark); }
+
+/* waiting-room doodling: same lift-above-the-crayon + halo treatment */
+#waiting .lobby-card { position: relative; }
+#waiting .lobby-card > *:not(.pond-layer) { position: relative; z-index: 2; }
+#waiting .codepill, #waiting .vote-status, #waiting .start-hint, #waitHint {
+  text-shadow: 0 0 3px var(--cream), 0 0 6px var(--cream), 0 0 10px var(--cream);
+}
+
+/* Your turn never waits on the crayon: while ANY doodle surface is open
+   (pond marker mode OR the card editor), the action buttons float above it,
+   announced by a pulsing "yer turn" chip — and the draw reveal flies above
+   the doodle UI too, so you draw, watch it land, and keep doodling. */
+body.pond-mode .stage-actions { z-index: 97; }              /* pond: buttons above the capture layer */
+body.my-turn.doodling-surface .stage-actions { z-index: 140; }   /* your turn: above card editors too (z135) */
+body.doodling-surface .fly-layer { z-index: 145; }          /* card reveal above any doodle surface */
+body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
+  content: "it's yer turn!";
+  flex-basis: 100%; text-align: center;
+  font-family: var(--display); font-size: 1.15rem; letter-spacing: .04em;
+  color: var(--bill); text-shadow: 2px 2px 0 var(--ink), 0 0 12px rgba(0,0,0,.6);
+  animation: honkPulse 1.2s infinite;
+}
+/* threat / announce / win overlay ALWAYS beats doodle editors — a Big Boy
+   response can never hide behind your art project */
+#overlay { z-index: 150; }
+@media (min-width: 1041px) {
+  /* keep the crayon toolbar clear of the floating action buttons */
+  body.pond-mode.has-actions .pond-bar { bottom: 138px; }
+}
+
 /* name-your-goose modal */
 .name-modal { z-index: 130; }
 .name-box { width: min(92vw, 380px); padding: 22px; display: flex; flex-direction: column; gap: 12px; }
