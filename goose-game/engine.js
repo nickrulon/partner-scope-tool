@@ -20,6 +20,35 @@ const nameSlots = (kind) => {
   return points(kind);
 };
 
+// --- Doodles ---------------------------------------------------------------
+// A doodle is a list of crayon strokes stored ON the card object — like names,
+// it survives discard → reshuffle and travels to whoever draws the card next.
+// Format: [{ c: 0..6 (palette index), w: 0..2 (weight), p: [x,y,x,y,...] }]
+// with coords as ints 0..1000 normalized to the card face. Vector (not
+// raster) so it renders crisp at every card size and stays small on the wire.
+const DOODLE_MAX_STROKES = 64;
+const DOODLE_MAX_POINTS = 1500;   // total across all strokes (~12KB JSON worst case)
+
+function cleanDoodle(input) {
+  if (!Array.isArray(input)) return null;
+  const out = [];
+  let pts = 0;
+  for (const s of input.slice(0, DOODLE_MAX_STROKES)) {
+    if (!s || !Array.isArray(s.p)) continue;
+    const c = Math.min(6, Math.max(0, s.c | 0));
+    const w = Math.min(2, Math.max(0, s.w | 0));
+    const p = [];
+    for (let i = 0; i + 1 < s.p.length && pts < DOODLE_MAX_POINTS; i += 2) {
+      const x = Math.round(+s.p[i]), y = Math.round(+s.p[i + 1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      p.push(Math.min(1000, Math.max(0, x)), Math.min(1000, Math.max(0, y)));
+      pts++;
+    }
+    if (p.length >= 4) out.push({ c, w, p });
+  }
+  return out.length ? out : null;
+}
+
 // Mulberry32 — small seedable RNG so tests are deterministic.
 export function makeRng(seed = Date.now() >>> 0) {
   let a = seed >>> 0;
@@ -49,14 +78,21 @@ function buildDeck(deckName, rng) {
   return shuffle(cards, rng);
 }
 
-// Gather every named goose (from every pile + hand) as {kind, names} — used to
-// carry names from a finished game into the next one.
+// Gather every personalized goose (from every pile + hand) as
+// {kind, names, doodle} — used to carry names AND doodles from a finished game
+// into the next one.
 export function collectNames(state) {
   const out = [];
   const scan = (arr) => {
     for (const c of arr || []) {
-      if (NAMEABLE.has(c.kind) && Array.isArray(c.names) && c.names.length) {
-        out.push({ kind: c.kind, names: c.names.slice() });
+      const named = NAMEABLE.has(c.kind) && Array.isArray(c.names) && c.names.length;
+      const doodled = Array.isArray(c.doodle) && c.doodle.length;
+      if (named || doodled) {
+        out.push({
+          kind: c.kind,
+          names: named ? c.names.slice() : [],
+          doodle: doodled ? c.doodle : null,
+        });
       }
     }
   };
@@ -67,15 +103,21 @@ export function collectNames(state) {
   return out;
 }
 
-// Stamp carried-over name-sets onto fresh, unnamed cards of the same kind, in
-// whichever deck holds that kind (goose deck or wild deck).
+// Stamp carried-over personalizations onto fresh, untouched cards of the same
+// kind, in whichever deck holds that kind (goose deck or wild deck).
 function applyCarriedNames(decks, carry) {
   if (!Array.isArray(carry)) return;
   const all = [].concat(...decks);
   for (const entry of carry) {
-    if (!entry || !NAMEABLE.has(entry.kind) || !Array.isArray(entry.names) || !entry.names.length) continue;
-    const card = all.find((c) => c.kind === entry.kind && !c.names);
-    if (card) card.names = entry.names.slice(0, nameSlots(entry.kind));
+    if (!entry || !CARD_META[entry.kind]) continue;
+    const names = (Array.isArray(entry.names) && entry.names.length && NAMEABLE.has(entry.kind))
+      ? entry.names.slice(0, nameSlots(entry.kind)) : null;
+    const doodle = cleanDoodle(entry.doodle);
+    if (!names && !doodle) continue;
+    const card = all.find((c) => c.kind === entry.kind && !c.names && !c.doodle);
+    if (!card) continue;
+    if (names) card.names = names;
+    if (doodle) card.doodle = doodle;
   }
 }
 
@@ -293,10 +335,12 @@ export function applyAction(state, playerId, action) {
   if (state.phase === 'GAME_OVER') return err(state, 'The game is over.');
   const type = action?.type;
 
-  // Naming geese is purely cosmetic: allowed any time on cards you own, and it
-  // never touches the turn, phase, or score. Names ride on the card object, so
-  // they survive discard → reshuffle and travel to whoever next draws the card.
+  // Naming and doodling are purely cosmetic: allowed any time on cards you
+  // own, and they never touch the turn, phase, or score. Both ride on the card
+  // object, so they survive discard → reshuffle and travel to whoever next
+  // draws the card.
   if (type === 'NAME_GOOSE') return nameGoose(state, playerId, action);
+  if (type === 'DOODLE_GOOSE') return doodleGoose(state, playerId, action);
 
   // Response phase: only the pending target may act.
   if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
@@ -338,6 +382,25 @@ function nameGoose(state, playerId, action) {
   card.names = names;
   if (names.length) {
     logMsg(state, `You named your ${CARD_META[card.kind].name}: ${names.join(', ')}.`, 'good', p.id);
+  }
+  return { state };
+}
+
+// Crayon doodles: any card in your own gaggle (regular or wild). Sending an
+// empty/invalid stroke set wipes the doodle (that's the editor's "Clear").
+function doodleGoose(state, playerId, action) {
+  const p = findPlayer(state, playerId);
+  if (!p) return err(state, 'Unknown goose.');
+  const card = p.regular.find((c) => c.id === action.cardId)
+    || p.wild.find((c) => c.id === action.cardId);
+  if (!card) return err(state, 'You can only doodle on geese in your own gaggle.');
+  const doodle = cleanDoodle(action.strokes);
+  if (doodle) {
+    card.doodle = doodle;
+    logMsg(state, `You doodled on your ${CARD_META[card.kind].name}. It's art.`, 'good', p.id);
+  } else {
+    delete card.doodle;
+    logMsg(state, `You wiped your ${CARD_META[card.kind].name} clean.`, 'info', p.id);
   }
   return { state };
 }

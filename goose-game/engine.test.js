@@ -274,6 +274,59 @@ console.log('\n== Draw fx carries the card id for the reveal ==');
   ok(fx && fx.cardId, 'DRAW fx includes a cardId');
 }
 
+console.log('\n== Doodles: own cards only, sanitized, clearable ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 71 });
+  g.players[0].regular = [{ id: 'g1', kind: 'GOOSE' }];
+  const strokes = [{ c: 1, w: 2, p: [100, 100, 500, 500, 900, 300] }];
+  const r1 = applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes });
+  ok(!r1.error, 'doodling your own card accepted');
+  eq(g.players[0].regular[0].doodle.length, 1, 'stroke stored on the card');
+  const r2 = applyAction(g, 'B', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes });
+  ok(!!r2.error, 'cannot doodle on a card you do not hold');
+  // Out-of-range values clamp; junk strokes drop; oversized input caps.
+  const messy = [
+    { c: 99, w: -5, p: [-50, 2000, 500, 500] },
+    { c: 0, w: 0, p: [1] },                       // too short — dropped
+    ...Array.from({ length: 80 }, () => ({ c: 0, w: 1, p: [0, 0, 10, 10] })),
+  ];
+  applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: messy });
+  const d = g.players[0].regular[0].doodle;
+  ok(d.length <= 64, `stroke count capped at 64 (got ${d.length})`);
+  ok(d[0].c === 6 && d[0].w === 0, 'palette/weight indexes clamped');
+  ok(Math.min(...d[0].p) >= 0 && Math.max(...d[0].p) <= 1000, 'coordinates clamped to 0..1000');
+  applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: [] });
+  ok(!g.players[0].regular[0].doodle, 'empty strokes clears the doodle');
+}
+
+console.log('\n== Doodles ride the card through discard (mustache travels) ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 72 });
+  g.players[0].regular = [{ id: 'g1', kind: 'GOOSE' }];
+  applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: [{ c: 0, w: 1, p: [100, 100, 200, 200] }] });
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  applyAction(g, 'A', { type: 'RESPOND', response: 'absorb' });
+  const inDiscard = g.gooseDiscard.find((c) => c.id === 'g1');
+  ok(inDiscard && inDiscard.doodle && inDiscard.doodle.length === 1, 'doodled goose kept its doodle in the discard');
+}
+
+console.log('\n== Doodles carry into the next game (with or without names) ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 73 });
+  g.players[0].regular = [
+    { id: 'g1', kind: 'GEESE', names: ['Moustachio'], doodle: [{ c: 0, w: 1, p: [1, 2, 3, 4] }] },
+    { id: 'g2', kind: 'GOOSE', doodle: [{ c: 3, w: 2, p: [5, 6, 7, 8] }] },   // doodle only, no name
+  ];
+  const carried = collectNames(g);
+  ok(carried.length === 2, 'collectNames captured both the named+doodled and doodle-only geese');
+  const g2 = createGame(p('A', 'B'), { firstSeat: 0, seed: 74, carryNames: carried });
+  const doodled = g2.gooseDraw.filter((c) => c.doodle && c.doodle.length);
+  eq(doodled.length, 2, 'both doodles landed on fresh cards in the new deck');
+  const withName = doodled.find((c) => c.kind === 'GEESE');
+  ok(withName && withName.names && withName.names[0] === 'Moustachio', 'name and doodle stayed together');
+}
+
 console.log('\n== Named geese carry into the next game ==');
 {
   const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 31 });

@@ -248,7 +248,7 @@ function resetTransient() {
   $('overlay').classList.add('hidden');
   $('overlay').classList.remove('win');
   $('flyLayer').innerHTML = '';
-  document.querySelectorAll('.name-modal').forEach((m) => m.remove());
+  document.querySelectorAll('.name-modal, .doodle-modal').forEach((m) => m.remove());
   clearTimeout(laneTimer);
   winDismissed = false; laneBusy = false;
   tradeMode = false; tradeSel.clear(); targetMode = null; goosedChoosing = false;
@@ -525,6 +525,8 @@ function cardEl(card, selectable) {
     `<div class="pts">${meta.points}</div>` +
     (showText ? `<div class="label">${esc(meta.name)}</div>` : '<div class="nameless"></div>');
   el.title = `${meta.name} — ${meta.desc || ''}`;
+  // Crayon doodles ride the card — whoever holds it sees the art.
+  if (Array.isArray(card.doodle) && card.doodle.length) el.appendChild(doodleLayer(card.doodle));
   return el;
 }
 
@@ -604,6 +606,13 @@ function openNameModal(cardId, onClose) {
     done();
   };
   row.appendChild(btn('Save name' + (max > 1 ? 's' : ''), 'btn-primary', save));
+  // Doodle keeps whatever names were typed, then swaps to the crayon editor.
+  row.appendChild(btn('Doodle', '', () => {
+    const names = inputs.map((x) => x.value.trim()).filter(Boolean);
+    sendWs('action', { action: { type: 'NAME_GOOSE', cardId, names } });
+    wrap.remove();
+    openDoodleModal(cardId, onClose);
+  }));
   row.appendChild(btn('Cancel', 'btn-ghost', done));
   box.appendChild(row);
   wrap.appendChild(box);
@@ -611,6 +620,214 @@ function openNameModal(cardId, onClose) {
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
   document.body.appendChild(wrap);
   inputs[0] && inputs[0].focus();
+}
+
+// ---- crayon doodles ----
+// Doodles are vector strokes stored on the card (like names), rendered here
+// with a procedural crayon brush: grainy speckle stamps walked along the
+// stroke path. Seeded randomness keeps the grain identical across re-renders
+// (no shimmering) while still looking hand-waxed.
+// Palette: black, orange (game bill), red (game bad), green (game good),
+// blue, brown, yellow. Weights: light / medium / bold — default medium black.
+const DOODLE_COLORS = ['#2a2118', '#e07a2e', '#b23b2e', '#5d8a3a', '#3a6ea5', '#7a4a26', '#d9a62e'];
+const DOODLE_COLOR_NAMES = ['black', 'orange', 'red', 'green', 'blue', 'brown', 'yellow'];
+const BRUSH_R = [7, 12, 20];           // stroke radius at a 600px-wide card
+const DOODLE_MAX_POINTS = 1500;        // matches the engine's cap
+
+// Tiny seeded PRNG so the crayon grain is stable frame to frame.
+function srng(seed) {
+  let a = (seed >>> 0) || 1;
+  return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; };
+}
+
+// A crayon "tip": a canvas of speckles inside a circle. Stamped repeatedly it
+// reads as waxy, uneven crayon — denser in the middle, ragged at the edges.
+const brushCache = {};
+function brushFor(colorIdx, weightIdx, cardW) {
+  const r = Math.max(2, BRUSH_R[weightIdx] * (cardW / 600));
+  const key = colorIdx + '|' + weightIdx + '|' + Math.round(r * 4);
+  if (brushCache[key]) return brushCache[key];
+  const size = Math.ceil(r * 2 + 4);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = DOODLE_COLORS[colorIdx];
+  const rnd = srng(colorIdx * 131 + weightIdx * 17 + size);
+  const grains = Math.round(r * r * 2.2);
+  const grainR = Math.max(0.8, r / 12);
+  for (let i = 0; i < grains; i++) {
+    const a = rnd() * Math.PI * 2;
+    const d = Math.sqrt(rnd()) * r;
+    ctx.globalAlpha = 0.05 + rnd() * 0.24;
+    ctx.beginPath();
+    ctx.arc(size / 2 + Math.cos(a) * d, size / 2 + Math.sin(a) * d, grainR * (0.5 + rnd()), 0, 7);
+    ctx.fill();
+  }
+  brushCache[key] = cv;
+  return cv;
+}
+
+// Stamp one segment of a stroke (from point i-1 to point i) onto ctx.
+// Coordinates are card-normalized 0..1000; w/h/ox/oy map them onto the ctx.
+function stampSegment(ctx, stroke, i, w, h, ox, oy, rnd) {
+  const brush = brushFor(stroke.c, stroke.w, w);
+  const r = BRUSH_R[stroke.w] * (w / 600);
+  const bs = brush.width;
+  const x0 = stroke.p[i - 2] / 1000 * w + ox, y0 = stroke.p[i - 1] / 1000 * h + oy;
+  const x1 = stroke.p[i] / 1000 * w + ox, y1 = stroke.p[i + 1] / 1000 * h + oy;
+  const dist = Math.hypot(x1 - x0, y1 - y0);
+  const steps = Math.max(1, Math.round(dist / (r * 0.35)));
+  for (let k = 1; k <= steps; k++) {
+    if (rnd() < 0.05) continue;   // dry-crayon skips
+    const t = k / steps;
+    const jx = (rnd() - 0.5) * r * 0.5, jy = (rnd() - 0.5) * r * 0.5;
+    ctx.drawImage(brush, x0 + (x1 - x0) * t + jx - bs / 2, y0 + (y1 - y0) * t + jy - bs / 2);
+  }
+}
+
+// Render a full doodle (all strokes) onto any 2d context.
+function paintDoodle(ctx, strokes, w, h, ox = 0, oy = 0) {
+  if (!Array.isArray(strokes)) return;
+  ctx.save();
+  strokes.forEach((s, si) => {
+    if (!s || !Array.isArray(s.p) || s.p.length < 4) return;
+    const rnd = srng(si * 7919 + s.p.length * 131 + s.c * 7 + s.w);
+    // a dab at the very first point so single taps leave a mark
+    const brush = brushFor(s.c, s.w, w);
+    ctx.drawImage(brush, s.p[0] / 1000 * w + ox - brush.width / 2, s.p[1] / 1000 * h + oy - brush.width / 2);
+    for (let i = 2; i + 1 < s.p.length; i += 2) stampSegment(ctx, s, i, w, h, ox, oy, rnd);
+  });
+  ctx.restore();
+}
+
+// Transparent canvas overlay that sits on a card face.
+function doodleLayer(doodle, res = 300) {
+  const cv = document.createElement('canvas');
+  cv.className = 'doodle-layer';
+  cv.width = res;
+  cv.height = Math.round(res * 4 / 3);
+  paintDoodle(cv.getContext('2d'), doodle, cv.width, cv.height);
+  return cv;
+}
+
+// The doodle editor: big card face, crayon canvas on top, palette + weights.
+function openDoodleModal(cardId, onClose) {
+  const card = (me().regular || []).find((c) => c.id === cardId)
+    || (me().wild || []).find((c) => c.id === cardId);
+  if (!card) { onClose && onClose(); return; }
+  const meta = cardMeta[card.kind] || {};
+  const strokes = (card.doodle || []).map((s) => ({ c: s.c, w: s.w, p: s.p.slice() }));
+  let selColor = 0, selWeight = 1;   // default: medium black
+  let cur = null;
+  let totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay doodle-modal';
+  const box = document.createElement('div');
+  box.className = 'paper doodle-box';
+  const title = document.createElement('div');
+  title.className = 'dd-title';
+  title.textContent = `Doodle on your ${meta.name || 'goose'}`;
+  box.appendChild(title);
+
+  const stage = document.createElement('div');
+  stage.className = 'dd-stage';
+  if (hasArt(card.kind)) stage.style.backgroundImage = `url(${artUrl[card.kind]})`;
+  else stage.style.backgroundColor = meta.color || '#6b8e23';
+  const cv = document.createElement('canvas');
+  cv.className = 'dd-canvas';
+  cv.width = 600; cv.height = 800;
+  const ctx = cv.getContext('2d');
+  stage.appendChild(cv);
+  box.appendChild(stage);
+
+  const repaint = () => { ctx.clearRect(0, 0, cv.width, cv.height); paintDoodle(ctx, strokes, cv.width, cv.height); };
+  repaint();
+
+  // --- tools ---
+  const tools = document.createElement('div');
+  tools.className = 'dd-tools';
+  const colors = document.createElement('div');
+  colors.className = 'dd-colors';
+  DOODLE_COLORS.forEach((hex, i) => {
+    const b = document.createElement('button');
+    b.className = 'dd-swatch' + (i === selColor ? ' sel' : '');
+    b.style.backgroundColor = hex;
+    b.title = DOODLE_COLOR_NAMES[i];
+    b.onclick = () => { selColor = i; colors.querySelectorAll('.dd-swatch').forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    colors.appendChild(b);
+  });
+  tools.appendChild(colors);
+  const weights = document.createElement('div');
+  weights.className = 'dd-weights';
+  ['light', 'medium', 'bold'].forEach((label, i) => {
+    const b = document.createElement('button');
+    b.className = 'dd-weight' + (i === selWeight ? ' sel' : '');
+    b.title = label;
+    const dot = document.createElement('span');
+    const px = [6, 10, 16][i];
+    dot.style.width = dot.style.height = px + 'px';
+    b.appendChild(dot);
+    b.onclick = () => { selWeight = i; weights.querySelectorAll('.dd-weight').forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    weights.appendChild(b);
+  });
+  const undo = btn('Undo', 'btn-ghost dd-mini', () => { strokes.pop(); totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0); repaint(); });
+  const clear = btn('Clear all', 'btn-ghost dd-mini', () => { strokes.length = 0; totalPts = 0; repaint(); });
+  weights.appendChild(undo);
+  weights.appendChild(clear);
+  tools.appendChild(weights);
+  box.appendChild(tools);
+
+  // --- drawing (pointer events; coords normalized to 0..1000) ---
+  const toXY = (e) => {
+    const r = cv.getBoundingClientRect();
+    return [
+      Math.round(Math.min(1000, Math.max(0, (e.clientX - r.left) / r.width * 1000))),
+      Math.round(Math.min(1000, Math.max(0, (e.clientY - r.top) / r.height * 1000))),
+    ];
+  };
+  cv.addEventListener('pointerdown', (e) => {
+    if (strokes.length >= 64 || totalPts >= DOODLE_MAX_POINTS) { toast('Yer crayon is worn down to a nub! (undo something)'); return; }
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch { /* synthetic events have no active pointer */ }
+    const [x, y] = toXY(e);
+    cur = { c: selColor, w: selWeight, p: [x, y] };
+    const brush = brushFor(selColor, selWeight, cv.width);
+    ctx.drawImage(brush, x / 1000 * cv.width - brush.width / 2, y / 1000 * cv.height - brush.width / 2);
+  });
+  cv.addEventListener('pointermove', (e) => {
+    if (!cur) return;
+    e.preventDefault();
+    const [x, y] = toXY(e);
+    const n = cur.p.length;
+    if (Math.hypot(x - cur.p[n - 2], y - cur.p[n - 1]) < 7) return;   // thin dense points
+    if (totalPts + cur.p.length / 2 >= DOODLE_MAX_POINTS) return;
+    cur.p.push(x, y);
+    // live stamp (Math.random jitter is fine mid-stroke; repaint on release is seeded)
+    stampSegment(ctx, cur, cur.p.length - 2, cv.width, cv.height, 0, 0, Math.random);
+  });
+  const endStroke = () => {
+    if (!cur) return;
+    if (cur.p.length >= 4) { strokes.push(cur); totalPts += cur.p.length / 2; }
+    cur = null;
+    repaint();
+  };
+  cv.addEventListener('pointerup', endStroke);
+  cv.addEventListener('pointercancel', endStroke);
+
+  // --- actions ---
+  const done = () => { wrap.remove(); onClose && onClose(); };
+  const row = document.createElement('div');
+  row.className = 'dd-actions';
+  row.appendChild(btn('Save doodle', 'btn-primary', () => {
+    sendWs('action', { action: { type: 'DOODLE_GOOSE', cardId, strokes } });
+    done();
+  }));
+  row.appendChild(btn('Cancel', 'btn-ghost', done));
+  box.appendChild(row);
+  wrap.appendChild(box);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
+  document.body.appendChild(wrap);
 }
 
 // ---- lawn-mower targeting (click a player panel) ----
@@ -724,6 +941,11 @@ async function downloadWinImage(w, win) {
       roundRectPath(ctx, x, y, cardW, cardH, r); ctx.fill();
       ctx.fillStyle = '#f1e7cf'; fitFont(ctx, cardMeta[c.kind]?.name || c.kind, Math.round(cardW * 0.13), cardW - 12, 'Georgia, serif');
       ctx.fillText(cardMeta[c.kind]?.name || c.kind, x + cardW / 2, y + cardH / 2);
+    }
+    if (Array.isArray(c.doodle) && c.doodle.length) {
+      ctx.save(); roundRectPath(ctx, x, y, cardW, cardH, r); ctx.clip();
+      paintDoodle(ctx, c.doodle, cardW, cardH, x, y);
+      ctx.restore();
     }
     ctx.strokeStyle = '#2a2118'; ctx.lineWidth = Math.max(3, cardW * 0.02);
     roundRectPath(ctx, x, y, cardW, cardH, r); ctx.stroke();
@@ -957,6 +1179,13 @@ function flyDraw({ faceKind, cardId, reveal, toEl, fromEl, onSettled }) {
   if (hasArt(kind)) card.style.backgroundImage = `url(${artUrl[kind]})`;
   else card.style.backgroundColor = faceKind ? (cardMeta[faceKind]?.color || '#caa') : '#1a3328';
   Object.assign(card.style, { left: `${fr.left}px`, top: `${fr.top}px`, width: `${w}px`, height: `${h}px` });
+  // Your own reveal shows any doodle already living on the card — the
+  // "who drew a mustache on this goose?!" moment.
+  if (reveal && cardId) {
+    const held = (me()?.regular || []).find((c) => c.id === cardId)
+      || (me()?.wild || []).find((c) => c.id === cardId);
+    if (held && Array.isArray(held.doodle) && held.doodle.length) card.appendChild(doodleLayer(held.doodle, 600));
+  }
   layer.appendChild(card);
 
   const HOLD = reveal ? 3000 : 500;
@@ -1022,6 +1251,17 @@ function buildDrawCaption(cardId, faceKind, hooks) {
       openNameModal(cardId, () => hooks.resume());
     };
     tag.appendChild(b);
+  }
+  if (card) {
+    const db = document.createElement('button');
+    db.className = 'btn dc-btn dc-later';
+    db.textContent = 'Doodle';
+    db.onclick = () => {
+      playSound('click');
+      hooks.pause();                       // freeze the fly-out while doodling
+      openDoodleModal(cardId, () => hooks.resume());
+    };
+    tag.appendChild(db);
   }
   // "Later" — dismiss the reveal now without naming (cream button under the orange one).
   const later = document.createElement('button');

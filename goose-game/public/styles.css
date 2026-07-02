@@ -275,8 +275,8 @@ input::placeholder { color: #9a8d6e; }
   display: flex; flex-direction: column; justify-content: space-between;
 }
 .card.tiny { width: 40px; border-width: 1.5px; }
-.card .pts { position: absolute; top: 3px; right: 4px; font-family: var(--display); font-size: .8rem; color: var(--cream); background: rgba(0,0,0,.6); border-radius: 6px; padding: 0 5px; }
-.card .label { background: rgba(243,236,216,.92); color: var(--ink); font-size: .6rem; text-transform: uppercase; letter-spacing: .03em; text-align: center; padding: 3px 2px; line-height: 1; }
+.card .pts { position: absolute; top: 3px; right: 4px; font-family: var(--display); font-size: .8rem; color: var(--cream); background: rgba(0,0,0,.6); border-radius: 6px; padding: 0 5px; z-index: 2; }
+.card .label { position: relative; z-index: 2; background: rgba(243,236,216,.92); color: var(--ink); font-size: .6rem; text-transform: uppercase; letter-spacing: .03em; text-align: center; padding: 3px 2px; line-height: 1; }
 .card .nameless { flex: 1; }
 .card.selectable { cursor: pointer; }
 .card.selectable:hover { transform: translateY(-6px); }
@@ -349,6 +349,33 @@ input::placeholder { color: #9a8d6e; }
 .card.nameable { cursor: pointer; }
 .card.nameable:hover { transform: translateY(-6px); }
 .card.big { width: clamp(110px, 15vh, 150px); }
+
+/* ---------- crayon doodles ---------- */
+/* the doodle overlay riding a card face */
+.doodle-layer { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.fly-card { overflow: hidden; }
+
+/* the doodle editor */
+.doodle-modal { z-index: 135; }
+.doodle-box { width: min(94vw, 460px); max-height: 94vh; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.dd-title { font-family: var(--display); font-size: 1.3rem; color: var(--ink); text-align: center; }
+.dd-stage {
+  position: relative; margin: 0 auto; aspect-ratio: 3/4;
+  width: min(100%, calc((94vh - 250px) * 3 / 4));
+  border: 2px solid var(--ink); border-radius: 10px; overflow: hidden;
+  background-color: var(--cream); background-size: cover; background-position: center; background-repeat: no-repeat;
+}
+.dd-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.dd-tools { display: flex; flex-direction: column; gap: 8px; }
+.dd-colors { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.dd-swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(0,0,0,.35); padding: 0; cursor: pointer; box-shadow: 0 2px 0 rgba(0,0,0,.2); }
+.dd-swatch.sel { outline: 3px solid var(--bill); outline-offset: 2px; }
+.dd-weights { display: flex; gap: 8px; justify-content: center; align-items: center; flex-wrap: wrap; }
+.dd-weight { width: 46px; height: 34px; display: flex; align-items: center; justify-content: center; background: #fbf6e7; border: 2px solid var(--paper-edge); border-radius: 8px; cursor: pointer; padding: 0; }
+.dd-weight.sel { border-color: var(--bill); box-shadow: 0 0 0 2px rgba(224,122,46,.3); }
+.dd-weight span { display: block; border-radius: 50%; background: var(--ink); }
+.dd-mini { font-size: .78rem; padding: 6px 12px; color: var(--ink); border-color: var(--ink); }
+.dd-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 
 /* name-your-goose modal */
 .name-modal { z-index: 130; }

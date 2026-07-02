@@ -110,9 +110,10 @@ function send(ws, type, payload) {
 
 // --- WebSocket protocol --------------------------------------------------
 
-// maxPayload: the biggest legit message is a chat line — cap frames well below
-// the 100MB ws default so one hostile client can't balloon memory.
-const wss = new WebSocketServer({ server: httpServer, maxPayload: 16 * 1024 });
+// maxPayload: the biggest legit message is a max-size doodle (~12KB of stroke
+// JSON) — cap frames well below the 100MB ws default so one hostile client
+// can't balloon memory.
+const wss = new WebSocketServer({ server: httpServer, maxPayload: 32 * 1024 });
 
 wss.on('connection', (ws) => {
   ws.meta = { roomCode: null, playerId: null };
