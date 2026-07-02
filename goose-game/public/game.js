@@ -602,6 +602,9 @@ function doTrade() { sendWs('action', { action: { type: 'TRADE', cardIds: [...tr
 // Goose holds 1 name, Geese 2, Geeses 4. Names persist on the card object, so
 // they survive the reshuffle and travel to whoever next draws the card.
 function openNameModal(cardId, onClose) {
+  // One editor at a time: save-close any doodle editor, drop stale name modals.
+  closeDoodleModals();
+  document.querySelectorAll('.name-modal').forEach((m) => m.remove());
   const done = () => { wrap.remove(); onClose && onClose(); };
   const card = (me().regular || []).find((c) => c.id === cardId)
     || (me().wild || []).find((c) => c.id === cardId);
@@ -757,7 +760,9 @@ function closeDoodleModals() {
 }
 
 // The doodle editor: big card face, crayon canvas on top, palette + weights.
+// Only ever ONE editor: opening a new doodle saves and closes any open one.
 function openDoodleModal(cardId, onClose) {
+  closeDoodleModals();
   const card = (me().regular || []).find((c) => c.id === cardId)
     || (me().wild || []).find((c) => c.id === cardId);
   if (!card) { onClose && onClose(); return; }
@@ -1525,14 +1530,17 @@ function buildDrawCaption(cardId, faceKind, hooks) {
   const max = NAME_MAX[faceKind] || 0;
   tag.innerHTML = `<div class="dc-name">${esc(meta.name || faceKind)}</div>` +
     (names.length ? `<div class="dc-geesenames">${names.map((n) => esc(n)).join(' · ')}</div>` : '');
+  // Name/Doodle DISMISS the reveal before opening their editor — the reveal
+  // renders above modals now, so leaving it paused would strand its buttons
+  // on top of the editor you just opened.
   if (max > 0 && names.length < max) {
     const b = document.createElement('button');
     b.className = 'btn btn-primary dc-btn';
     b.textContent = names.length ? 'Add a name' : (max > 1 ? 'Name your geese' : 'Name this goose');
     b.onclick = () => {
       playSound('click');
-      hooks.pause();                       // freeze the fly-out while naming
-      openNameModal(cardId, () => hooks.resume());
+      hooks.dismiss();                     // card sails to the gaggle
+      openNameModal(cardId);
     };
     tag.appendChild(b);
   }
@@ -1542,8 +1550,8 @@ function buildDrawCaption(cardId, faceKind, hooks) {
     db.textContent = 'Doodle';
     db.onclick = () => {
       playSound('click');
-      hooks.pause();                       // freeze the fly-out while doodling
-      openDoodleModal(cardId, () => hooks.resume());
+      hooks.dismiss();                     // card sails to the gaggle
+      openDoodleModal(cardId);
     };
     tag.appendChild(db);
   }
