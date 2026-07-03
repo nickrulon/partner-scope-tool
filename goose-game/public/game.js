@@ -17,7 +17,12 @@ localStorage.setItem(PID_KEY, playerId);
 // every connect. Purchases (Host Pass, packs) attach to it. In the iOS app,
 // Capacitor is present and hosting is gated; on the web everything stays free.
 const ACCT_KEY = 'goose_acct';
-let accountId = localStorage.getItem(ACCT_KEY) || `a_${Math.random().toString(36).slice(2, 12)}`;
+// Identity survives two ways: localStorage AND a server-set cookie. The
+// cookie matters on iOS Safari, which purges localStorage after ~7 days away
+// but leaves HTTP-set cookies alone — so a Host Pass bought on your phone is
+// still remembered months later.
+const cookieAcct = (document.cookie.match(/(?:^|;\s*)ga=(a_[a-z0-9]{6,32})/i) || [])[1] || null;
+let accountId = localStorage.getItem(ACCT_KEY) || cookieAcct || `a_${Math.random().toString(36).slice(2, 12)}`;
 localStorage.setItem(ACCT_KEY, accountId);
 const PLATFORM = (window.Capacitor && window.Capacitor.getPlatform && window.Capacitor.getPlatform() === 'ios')
   ? 'ios' : (window.GOOSE_PLATFORM || 'web');
@@ -126,6 +131,9 @@ function connect() {
     else if (type === 'account') {
       // Server-confirmed identity + owned products.
       if (payload.accountId) { accountId = payload.accountId; localStorage.setItem(ACCT_KEY, accountId); }
+      // Refresh the long-lived identity cookie (sliding 2-year window; also
+      // the iOS-Safari-proof copy of who we are).
+      fetch('/acct', { method: 'POST', body: accountId }).catch(() => { /* offline is fine */ });
       const hadPass = myEntitlements.includes('host_pass');
       myEntitlements = payload.entitlements || [];
       // Magic friend link (?friend=CODE): auto-redeem once, right after the
@@ -868,6 +876,7 @@ function syncDoodleSurface() {
   document.body.classList.toggle('doodling-surface', on);
   document.body.classList.toggle('card-editor-open', editorOpen);   // hides the pond toggle behind the editor
   if (!on) resetActionsDrag();   // leaving doodle mode → bar returns to its home position
+  syncStageDrag();
 }
 
 // While a doodle surface is open, the floating your-turn bar can be DRAGGED
@@ -926,8 +935,27 @@ function openDoodleModal(cardId, onClose) {
   const meta = cardMeta[card.kind] || {};
   const strokes = (card.doodle || []).map((s) => ({ c: s.c, w: s.w, p: s.p.slice() }));
   let selColor = 0, selWeight = 1;   // default: medium black
+  let selErase = false;              // eraser tool, sized by the weight setting
   let cur = null;
   let totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0);
+
+  // Precision erase at (x,y): carve away just the touched parts of strokes,
+  // splitting them into surviving pieces — the crayon in reverse.
+  const eraseEditorAt = (x, y) => {
+    const rr0 = brushRNorm(selWeight);
+    let changed = false;
+    for (let i = strokes.length - 1; i >= 0; i--) {
+      const s = strokes[i];
+      const runs = carveRun(s.p, x, y, rr0 + brushRNorm(s.w) * 0.5);
+      if (runs.length === 1 && runs[0].length === s.p.length) continue;
+      changed = true;
+      strokes.splice(i, 1, ...runs.map((p) => ({ c: s.c, w: s.w, p })));
+    }
+    if (changed) {
+      totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0);
+      repaint();
+    }
+  };
 
   const wrap = document.createElement('div');
   wrap.className = 'overlay doodle-modal';
@@ -962,12 +990,17 @@ function openDoodleModal(cardId, onClose) {
     b.className = 'dd-swatch' + (i === selColor ? ' sel' : '');
     b.style.backgroundColor = hex;
     b.title = DOODLE_COLOR_NAMES[i];
-    b.onclick = () => { selColor = i; colors.querySelectorAll('.dd-swatch').forEach((x, j) => x.classList.toggle('sel', j === i)); };
+    b.onclick = () => { setEditorErase(false); selColor = i; colors.querySelectorAll('.dd-swatch').forEach((x, j) => x.classList.toggle('sel', j === i)); };
     colors.appendChild(b);
   });
   tools.appendChild(colors);
   const weights = document.createElement('div');
   weights.className = 'dd-weights';
+  const setEditorErase = (on) => {
+    selErase = on;
+    weights.querySelector('.dd-eraser')?.classList.toggle('sel', on);
+    cv.classList.toggle('erasing', on);
+  };
   ['light', 'medium', 'bold'].forEach((label, i) => {
     const b = document.createElement('button');
     b.className = 'dd-weight' + (i === selWeight ? ' sel' : '');
@@ -976,9 +1009,11 @@ function openDoodleModal(cardId, onClose) {
     const px = [6, 10, 16][i];
     dot.style.width = dot.style.height = px + 'px';
     b.appendChild(dot);
+    // Weight stays live in eraser mode — it sets the eraser's size too.
     b.onclick = () => { selWeight = i; weights.querySelectorAll('.dd-weight').forEach((x, j) => x.classList.toggle('sel', j === i)); };
     weights.appendChild(b);
   });
+  weights.appendChild(btn('Eraser', 'btn-ghost dd-mini dd-eraser', () => setEditorErase(!selErase)));
   const undo = btn('Undo', 'btn-ghost dd-mini', () => { strokes.pop(); totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0); repaint(); });
   const clear = btn('Clear all', 'btn-ghost dd-mini', () => { strokes.length = 0; totalPts = 0; repaint(); });
   weights.appendChild(undo);
@@ -995,6 +1030,14 @@ function openDoodleModal(cardId, onClose) {
     ];
   };
   cv.addEventListener('pointerdown', (e) => {
+    if (selErase) {
+      e.preventDefault();
+      try { cv.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+      cur = { erasing: true };
+      const [ex, ey] = toXY(e);
+      eraseEditorAt(ex, ey);
+      return;
+    }
     if (strokes.length >= 64 || totalPts >= DOODLE_MAX_POINTS) { toast('Yer crayon is worn down to a nub! (undo something)'); return; }
     e.preventDefault();
     try { cv.setPointerCapture(e.pointerId); } catch { /* synthetic events have no active pointer */ }
@@ -1007,6 +1050,7 @@ function openDoodleModal(cardId, onClose) {
   cv.addEventListener('pointermove', (e) => {
     if (!cur) return;
     e.preventDefault();
+    if (cur.erasing) { const [ex, ey] = toXY(e); eraseEditorAt(ex, ey); return; }
     const [x, y] = toXY(e);
     const n = cur.p.length;
     if (Math.hypot(x - cur.p[n - 2], y - cur.p[n - 1]) < 7) return;   // thin dense points
@@ -1019,6 +1063,7 @@ function openDoodleModal(cardId, onClose) {
   const endStroke = () => {
     stopScribble();
     if (!cur) return;
+    if (cur.erasing) { cur = null; return; }   // erase repaints as it goes
     if (cur.p.length >= 4) { strokes.push(cur); totalPts += cur.p.length / 2; }
     cur = null;
     repaint();
@@ -1038,6 +1083,7 @@ function openDoodleModal(cardId, onClose) {
   wrap.appendChild(box);
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
   document.body.appendChild(wrap);
+  makeDraggable(box, 'doodleBox');   // pull the editor out of the way of the table
   syncDoodleSurface();
 }
 
@@ -1052,14 +1098,79 @@ let pondMode = false, pondColor = 0, pondWeight = 1, pondCur = null;
 // Set when a turn action (trade, lawn mower) needs the table back — marker
 // mode suspends for the transaction and resumes right after.
 let pondResume = false;
-// Eraser tool: rubs out whole strokes it touches (anyone's — same social
-// contract as doodling over someone's art).
+// Eraser tool: carves away just the parts of strokes it passes over
+// (anyone's — same social contract as doodling over someone's art).
 let pondErase = false;
-const erasePending = new Set();   // optimistic local hides until the server confirms
-let eraseBatch = new Set(), eraseTimer = null;
 // Other players' in-progress strokes (streamed live), keyed by player id.
 const pondLive = {};
 let pondLiveLastSent = 0;
+
+// ---- draggable floating panels ----
+// Any floating panel (crayon toolbar, card doodle editor, the your-turn
+// action bar) gets a dotted grip in its top-left corner — drag it anywhere.
+// Positions are remembered per panel for the session, surviving re-renders.
+const dragPos = {};   // key -> { left, top }
+
+function applyDragPos(el, pos) {
+  el.style.position = 'fixed';
+  el.style.left = pos.left + 'px';
+  el.style.top = pos.top + 'px';
+  el.style.right = 'auto';
+  el.style.bottom = 'auto';
+  el.style.transform = 'none';
+  el.style.margin = '0';
+}
+
+function makeDraggable(el, key) {
+  if (el.querySelector(':scope > .drag-grip')) return;
+  const grip = document.createElement('div');
+  grip.className = 'drag-grip';
+  grip.title = 'Drag to move';
+  el.prepend(grip);
+  if (dragPos[key]) applyDragPos(el, dragPos[key]);
+  let dragging = false, dx = 0, dy = 0;
+  grip.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    try { grip.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+    const r = el.getBoundingClientRect();
+    el.style.width = r.width + 'px';   // keep its shape once out of the layout
+    applyDragPos(el, { left: r.left, top: r.top });
+    dx = e.clientX - r.left; dy = e.clientY - r.top;
+    dragging = true;
+  });
+  grip.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    e.preventDefault();
+    const pos = {
+      left: Math.min(window.innerWidth - 48, Math.max(4, e.clientX - dx)),
+      top: Math.min(window.innerHeight - 40, Math.max(4, e.clientY - dy)),
+    };
+    dragPos[key] = pos;
+    applyDragPos(el, pos);
+  });
+  const end = () => { dragging = false; };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+}
+
+// The your-turn action bar already drags (grab anywhere that isn't a button)
+// — this just adds/removes the visible corner grip so people KNOW it drags.
+function syncStageDrag() {
+  const sa = $('stageActions');
+  if (!sa) return;
+  const floating = document.body.classList.contains('my-turn')
+    && document.body.classList.contains('doodling-surface')
+    && sa.children.length > 0;
+  const grip = sa.querySelector(':scope > .drag-grip');
+  if (floating && !grip) {
+    const g = document.createElement('div');
+    g.className = 'drag-grip on-dark';
+    g.title = 'Drag to move';
+    sa.prepend(g);
+  } else if (!floating && grip) {
+    grip.remove();
+  }
+}
 
 // Doodling works on the game table AND in the waiting room.
 function doodleScreen() {
@@ -1098,13 +1209,21 @@ function pondCanvasFor(el) {
 // idempotent — called after any render that rebuilds a zone's DOM.
 function renderPond() {
   if (!view || !view.code || !doodleScreen()) return;
-  // Drop optimistic erases the server has confirmed, and stale live previews.
+  // Drop carve overlays the server has confirmed, and stale live previews.
   const stored = (view.pond || []);
-  for (const id of [...erasePending]) if (!stored.some((s) => s.i === id)) erasePending.delete(id);
+  for (const id of [...pondCarves.keys()]) if (!stored.some((s) => s.i === id)) pondCarves.delete(id);
   const now = Date.now();
   for (const [by, s] of Object.entries(pondLive)) if (now - s.t > 6000) delete pondLive[by];
   const byZone = {};
-  stored.forEach((s) => { if (!erasePending.has(s.i)) (byZone[s.z] = byZone[s.z] || []).push(s); });
+  stored.forEach((s) => {
+    const bucket = (byZone[s.z] = byZone[s.z] || []);
+    if (pondCarves.has(s.i)) {
+      // Mid-erase (or awaiting the server): draw the surviving pieces instead.
+      for (const p of pondCarves.get(s.i)) bucket.push({ ...s, p });
+    } else {
+      bucket.push(s);
+    }
+  });
   Object.values(pondLive).forEach((s) => { (byZone[s.z] = byZone[s.z] || []).push(s); });
   for (const [zone, el] of pondZoneEls()) {
     const strokes = byZone[zone];
@@ -1197,39 +1316,64 @@ function buildPondBar() {
   if (playerId === view?.hostId) weights.appendChild(btn('Clear pond', 'btn-ghost dd-mini', () => sendWs('pond', { op: 'clear' })));
   weights.appendChild(btn('Done', 'btn-primary dd-mini', () => setPondMode(false)));
   bar.appendChild(weights);
+  makeDraggable(bar, 'pondBar');   // grip in the corner — pull the toolbar anywhere
 }
 
 $('pondBtn').onclick = () => { playSound('click'); setPondMode(!pondMode); };
 
-// The eraser: rub over strokes to pick them off. Hits are hidden instantly
-// (optimistic) and batched to the server. Its reach follows the selected
-// weight — light is a precision pick, bold is a broad sweep — plus the
-// stroke's own thickness (an eraser edge meeting a crayon line).
+// The PRECISION eraser: it behaves like the crayon in reverse — its tip is
+// sized by the selected weight (light/medium/bold), and it removes only the
+// bits of a stroke it actually passes over, splitting strokes into the
+// surviving pieces rather than deleting them whole.
 const brushRNorm = (w) => BRUSH_R[w] * (1000 / 600);   // brush radius in zone-normalized units
+
+// Carve one point-run: remove points within radius rr of (x,y); return the
+// surviving runs (each needs ≥2 points to remain a drawable stroke).
+function carveRun(p, x, y, rr) {
+  const runs = [];
+  let run = [];
+  const flush = () => { if (run.length >= 4) runs.push(run); run = []; };
+  for (let i = 0; i + 1 < p.length; i += 2) {
+    if (Math.hypot(p[i] - x, p[i + 1] - y) < rr) flush();
+    else run.push(p[i], p[i + 1]);
+  }
+  flush();
+  return runs;
+}
+
+// Local carve state during an eraser drag: stroke id → its current surviving
+// runs. Rendered immediately (renderPond substitutes these), then sent to the
+// server as `carve` ops on release.
+const pondCarves = new Map();
+
 function eraseAt(e) {
   const hit = zoneAt(e.clientX, e.clientY);
   if (!hit) return;
   const [x, y] = pondXY(e, hit.r);
   const eraseR = brushRNorm(pondWeight);
   for (const s of (view.pond || [])) {
-    if (s.z !== hit.z || s.i == null || erasePending.has(s.i)) continue;
-    const reach = eraseR + brushRNorm(s.w);
-    for (let i = 0; i + 1 < s.p.length; i += 2) {
-      if (Math.hypot(s.p[i] - x, s.p[i + 1] - y) < reach) {
-        erasePending.add(s.i);
-        eraseBatch.add(s.i);
-        break;
-      }
+    if (s.z !== hit.z || s.i == null) continue;
+    const rr = eraseR + brushRNorm(s.w) * 0.5;   // eraser tip meets crayon edge
+    const runs = pondCarves.has(s.i) ? pondCarves.get(s.i) : [s.p];
+    let changed = false;
+    const next = [];
+    for (const run of runs) {
+      const carved = carveRun(run, x, y, rr);
+      if (carved.length !== 1 || carved[0].length !== run.length) changed = true;
+      next.push(...carved);
     }
-  }
-  if (eraseBatch.size && !eraseTimer) {
-    eraseTimer = setTimeout(() => {
-      eraseTimer = null;
-      sendWs('pond', { op: 'erase', ids: [...eraseBatch] });
-      eraseBatch = new Set();
-    }, 150);
+    if (changed || pondCarves.has(s.i)) pondCarves.set(s.i, next);
   }
   renderPond();
+}
+
+// On release: tell the server what survived of each touched stroke.
+function flushCarves() {
+  for (const [id, parts] of pondCarves) {
+    sendWs('pond', { op: 'carve', id, parts });
+  }
+  // Keep entries until the broadcast replaces the originals (renderPond drops
+  // an entry the moment its original id disappears from the stored pond).
 }
 
 // Drawing on the capture layer: the stroke belongs to whichever zone it
@@ -1278,7 +1422,7 @@ function eraseAt(e) {
     const wasErasing = pondCur.erasing;
     const { zone, s } = pondCur;
     pondCur = null;
-    if (wasErasing) return;
+    if (wasErasing) { flushCarves(); return; }
     if (s.p.length >= 4) sendWs('pond', { op: 'stroke', stroke: { z: zone, c: s.c, w: s.w, p: s.p } });
     else { sendWs('pond', { op: 'live', stroke: null }); renderPond(); }   // tell others the preview is over
   };

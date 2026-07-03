@@ -44,6 +44,25 @@ const httpServer = http.createServer((req, res) => {
   }
   if (req.url === '/healthz') { res.writeHead(200); return res.end('honk'); }
 
+  // Account cookie: the client mirrors its account id here after every
+  // connect. An HTTP-set cookie is exempt from iOS Safari's 7-day purge of
+  // script-writable storage (localStorage!), so a buyer who comes back months
+  // later on their iPhone is still recognized. Sliding 2-year window.
+  if (req.method === 'POST' && req.url.startsWith('/acct')) {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 200) req.destroy(); });
+    req.on('end', () => {
+      const id = String(body || '').trim();
+      if (!/^a_[a-z0-9]{6,32}$/i.test(id)) { res.writeHead(400); return res.end('no'); }
+      const secure = (req.headers['x-forwarded-proto'] === 'https') ? '; Secure' : '';
+      res.writeHead(200, {
+        'Set-Cookie': `ga=${id}; Max-Age=63072000; Path=/; SameSite=Lax${secure}`,
+      });
+      res.end('ok');
+    });
+    return;
+  }
+
   // Gumroad Ping: fires on every sale of the Host Pass. Always answer 200
   // (Gumroad retries otherwise); the license verify guards against fakes.
   if (req.method === 'POST' && req.url.startsWith('/gumroad/ping')) {
@@ -184,7 +203,7 @@ function pondRelay(room, exceptPid, payload) {
   for (const s of room.spectators.values()) send(s.ws, 'pondlive', payload);
 }
 
-function doPond(ws, { op, stroke, ids }) {
+function doPond(ws, { op, stroke, ids, id, parts }) {
   const room = getRoom(ws.meta.roomCode);
   if (!room || ws.meta.isSpectator) return;   // players only (waiting room OR in-game)
   const pid = ws.meta.playerId;
@@ -211,6 +230,33 @@ function doPond(ws, { op, stroke, ids }) {
     if (!Array.isArray(ids)) return;
     const kill = new Set(ids.slice(0, 64).map((n) => n | 0));
     room.pond = room.pond.filter((s) => !kill.has(s.i));
+  } else if (op === 'carve') {
+    // Precision erasing: replace one stroke with the surviving sub-strokes
+    // after the eraser passed through it. Empty parts = fully erased.
+    const idx = room.pond.findIndex((s) => s.i === (id | 0));
+    if (idx === -1) return;   // already gone (another eraser beat us)
+    const orig = room.pond[idx];
+    if (!Array.isArray(parts)) return;
+    const clean = [];
+    let total = 0;
+    for (const run of parts.slice(0, 12)) {
+      if (!Array.isArray(run)) continue;
+      const p = [];
+      for (let i = 0; i + 1 < run.length; i += 2) {
+        const x = Math.round(+run[i]), y = Math.round(+run[i + 1]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        p.push(Math.min(1000, Math.max(0, x)), Math.min(1000, Math.max(0, y)));
+      }
+      total += p.length / 2;
+      if (p.length >= 4) clean.push(p);
+    }
+    if (total > orig.p.length / 2) return;   // carving can only remove, never add
+    const replacements = clean.map((p) => {
+      room.pondSeq = (room.pondSeq || 0) + 1;
+      return { i: room.pondSeq, z: orig.z, c: orig.c, w: orig.w, p, by: orig.by };
+    });
+    room.pond.splice(idx, 1, ...replacements);
+    while (room.pond.length > POND_MAX_STROKES) room.pond.shift();
   } else if (op === 'stroke') {
     const clean = pondSanitize(room, stroke);
     if (!clean) return;

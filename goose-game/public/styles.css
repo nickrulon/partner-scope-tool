@@ -441,6 +441,26 @@ body.pond-mode .pond-btn { background: var(--bill); color: #2a1500; border-color
 /* eraser mode: swap the crosshair for a "rubbing" cursor + highlight */
 body.pond-erasing .pond-capture { cursor: cell; }
 .dd-eraser.sel { background: var(--bill); color: #2a1500; border-color: var(--bill-dark); }
+/* editor canvas in eraser mode */
+.dd-canvas.erasing { cursor: cell; }
+
+/* ---------- draggable panels: the corner grip ---------- */
+/* a small plate of dots — the universal "you can drag me" glyph */
+.drag-grip {
+  position: absolute; top: 4px; left: 5px; width: 20px; height: 20px;
+  cursor: grab; touch-action: none; z-index: 6; border-radius: 5px;
+  background-image: radial-gradient(var(--ink-soft) 1.1px, transparent 1.5px);
+  background-size: 6px 6px; background-position: 2px 3px;
+  opacity: .5;
+}
+.drag-grip:hover { opacity: .95; background-color: rgba(0,0,0,.07); }
+.drag-grip:active { cursor: grabbing; }
+/* cream dots for grips sitting on the dark table (your-turn bar) */
+.drag-grip.on-dark { background-image: radial-gradient(rgba(241,231,207,.85) 1.1px, transparent 1.5px); }
+/* panels the grip lives on need to anchor it */
+.doodle-box { position: relative; }
+.stage-actions { position: relative; }
+.pond-bar { padding-left: 28px; }
 
 /* waiting-room doodling: same lift-above-the-crayon + halo treatment */
 #waiting .lobby-card { position: relative; }

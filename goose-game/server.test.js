@@ -232,13 +232,45 @@ try {
     host.send('pond', { op: 'stroke', stroke: { z: 'play', c: 0, w: 1, p: [10, 10, 90, 90] } });
     const doneMsg = await rex.wait((m) => m.type === 'pondlive' && m.payload.done, 'preview cleared on commit');
     ok(!!doneMsg, 'committing the stroke ends the live preview');
-    // Eraser: strokes have ids; erase removes them (any owner).
-    const st = await rex.wait(isState((s) => (s.pond || []).length === 1 && s.pond[0].i != null), 'stroke has an id');
-    ok(true, 'strokes carry ids for the eraser');
-    rex.send('pond', { op: 'erase', ids: [st.payload.pond[0].i] });
-    await rex.wait(isState((s) => (s.pond || []).length === 0), 'stroke erased');
+    // Eraser: strokes have ids; erase removes them (any owner). Strokes are
+    // tagged with distinct colors so waits can't match stale backlog states.
+    const eStP = rex.waitNext(isState((s) => (s.pond || []).some((x) => x.c === 3)), 'erase target placed');
+    host.send('pond', { op: 'stroke', stroke: { z: 'play', c: 3, w: 0, p: [20, 20, 80, 80] } });
+    const eTarget = (await eStP).payload.pond.find((x) => x.c === 3);
+    ok(eTarget.i != null, 'strokes carry ids for the eraser');
+    const eGoneP = rex.waitNext(isState((s) => !(s.pond || []).some((x) => x.i === eTarget.i)), 'stroke erased');
+    rex.send('pond', { op: 'erase', ids: [eTarget.i] });
+    await eGoneP;
     ok(true, 'the eraser rubs out strokes by id (any owner)');
+    // Precision eraser: carve replaces one stroke with its surviving pieces.
+    const carvedP = rex.waitNext(isState((s) => (s.pond || []).some((x) => x.c === 2)), 'carve target placed');
+    host.send('pond', { op: 'stroke', stroke: { z: 'play', c: 2, w: 1, p: [100, 100, 200, 200, 300, 300, 400, 400, 500, 500, 600, 600] } });
+    const target = (await carvedP).payload.pond.find((x) => x.c === 2);
+    const afterP = rex.waitNext(isState((s) => (s.pond || []).filter((x) => x.c === 2).length === 2), 'stroke split in two');
+    host.send('pond', { op: 'carve', id: target.i, parts: [[100, 100, 200, 200], [500, 500, 600, 600]] });
+    const pieces = (await afterP).payload.pond.filter((x) => x.c === 2);
+    ok(pieces.every((s) => s.i !== target.i && s.by === target.by),
+      'carved pieces get new ids but keep the color and artist');
+    // Carving can only remove — parts with MORE points than the original are refused.
+    host.send('pond', { op: 'carve', id: pieces[0].i, parts: [[1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7]] });
+    await sleep(300);
+    ok(rex.lastState().pond.filter((x) => x.c === 2).length === 2, 'a carve that adds points is rejected');
+    // Empty parts = the eraser consumed the whole stroke.
+    const goneP = rex.waitNext(isState((s) => (s.pond || []).filter((x) => x.c === 2).length === 1), 'fully-erased stroke removed');
+    host.send('pond', { op: 'carve', id: pieces[0].i, parts: [] });
+    await goneP;
+    ok(true, 'carve with no survivors deletes the stroke');
     clients.forEach((c) => c.close());
+  }
+
+  console.log('\n== Identity cookie endpoint (iOS Safari persistence) ==');
+  {
+    const good = await fetch(`http://localhost:${PORT}/acct`, { method: 'POST', body: 'a_cookiegoose1' });
+    const setCookie = good.headers.get('set-cookie') || '';
+    ok(good.ok && /ga=a_cookiegoose1/.test(setCookie) && /Max-Age=63072000/.test(setCookie),
+      'valid account id gets a 2-year HTTP-set cookie');
+    const bad = await fetch(`http://localhost:${PORT}/acct`, { method: 'POST', body: 'DROP TABLE geese' });
+    ok(bad.status === 400, 'garbage account ids are refused');
   }
 
   console.log('\n== Waiting-room doodles (no game yet) ==');
