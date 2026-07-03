@@ -37,7 +37,27 @@ This makes purchases unlock the pass automatically in the buyer's open tab.
 (If a ping ever misses, the buyer just pastes their license key — the game's
 upgrade sheet has a redeem box.)
 
+## 2.5 Free copies for friends & family (offer codes)
+
+Gumroad → your product → Checkout/Discounts → create an offer code at
+**100% off** (optionally capped at N uses). A $0 "purchase" still generates a
+real license key and still fires the Ping — the game treats it exactly like a
+sale. Share the auto-applying link:
+
+```
+https://YOURNAME.gumroad.com/l/goosehostpass/YOURCODE
+```
+
+Every freebie is tracked in your Gumroad dashboard; kill the code anytime.
+
 ## 3. Flip the switch on Render
+
+**⚠ Do this at the same time: upgrade the Render instance.** The free tier's
+disk is wiped on every deploy/restart — fine while nothing is for sale, fatal
+once purchases exist (the server would forget who bought and buyers would
+have to re-redeem keys). Upgrade to Starter (~$7/mo), add a 1GB persistent
+disk mounted at `/data`, and set `GOOSE_DB=/data/goose.db`. Gumroad's records
+always remain the permanent backup, but the disk makes deploys a non-event.
 
 Render dashboard → your service → Environment → add:
 
