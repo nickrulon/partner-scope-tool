@@ -452,12 +452,12 @@ async function gumroadVerifyOnce(paramName, key, increment) {
   }
 }
 
-// GUMROAD_PRODUCT_ID may hold EITHER the product's permalink (the easy-to-find
-// short slug, e.g. "kgbop") OR the long product_id. Gumroad's verify API keys
-// on different param names for each, so try product_id first, then
-// product_permalink — whichever the value actually is, one matches. Only the
-// SUCCEEDING call increments the use count (a wrong param name just returns
-// success:false without touching it).
+// GUMROAD_PRODUCT_ID must hold the real long product_id (e.g.
+// "-gfCeE8Olnzl-rCvx2mrFQ=="), NOT the permalink — Gumroad deprecated
+// permalink verification (product_permalink now hard-errors). We still try
+// product_permalink as a legacy fallback in case Gumroad ever re-enables it;
+// only the SUCCEEDING call increments the use count. See GUMROAD_SETUP.md for
+// how to find the product_id.
 async function verifyGumroadLicense(key, { increment = false } = {}) {
   if (GUMROAD_TEST_KEY && key === GUMROAD_TEST_KEY) return { ok: true, saleId: 'test_sale' };
   if (!GUMROAD_PRODUCT_ID) return { ok: false, why: 'purchases not configured yet' };

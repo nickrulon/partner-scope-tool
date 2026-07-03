@@ -64,8 +64,23 @@ Render dashboard → your service → Environment → add:
 | Key | Value |
 |---|---|
 | `GOOSE_GATE_WEB` | `1` |
-| `GOOSE_GUMROAD_PRODUCT_ID` | the product **permalink** — the short slug in your product URL (e.g. `kgbop`). The long product_id also works, but the permalink is far easier to find. |
+| `GOOSE_GUMROAD_PRODUCT_ID` | the real long **product_id** (e.g. `-gfCeE8Olnzl-rCvx2mrFQ==`). **NOT** the permalink — Gumroad deprecated permalink verification. See "Finding the product_id" below. |
 | `GOOSE_GUMROAD_URL` | your full product URL, e.g. `https://nickster612.gumroad.com/l/kgbop` |
+
+### Finding the product_id
+
+Gumroad hides it in the UI, but the license-verify API reveals it. Run (with
+any real license key from a test purchase):
+
+```
+curl -s -X POST https://api.gumroad.com/v2/licenses/verify \
+  --data-urlencode "product_permalink=YOUR_PERMALINK" \
+  --data-urlencode "license_key=A-KEY-FROM-A-SALE"
+```
+
+It fails on purpose, but the error message says *"Please set 'product_id' to
+'XXXX==' "* — that `XXXX==` is your product_id. (Or verify with a real key and
+read `purchase.product_id` from the JSON.)
 
 Save → the service redeploys → hosting is now gated. To un-launch at any
 time, delete `GOOSE_GATE_WEB` and everything is free again. Nothing else
