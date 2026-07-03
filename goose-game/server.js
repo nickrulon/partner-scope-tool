@@ -432,28 +432,48 @@ const GUMROAD_URL = process.env.GOOSE_GUMROAD_URL || '';
 const GUMROAD_TEST_KEY = process.env.GOOSE_GUMROAD_TEST_KEY || '';   // tests/dev only
 const REDEEM_USE_CAP = 5;   // one key restores on up to 5 browsers/devices
 
-async function verifyGumroadLicense(key, { increment = false } = {}) {
-  if (GUMROAD_TEST_KEY && key === GUMROAD_TEST_KEY) return { ok: true, saleId: 'test_sale' };
-  if (!GUMROAD_PRODUCT_ID) return { ok: false, why: 'purchases not configured yet' };
+// One verify attempt against Gumroad, identifying the product by a given
+// param name. Returns { data } on a completed HTTP call, or { netErr } if the
+// request itself failed.
+async function gumroadVerifyOnce(paramName, key, increment) {
   try {
     const resp = await fetch('https://api.gumroad.com/v2/licenses/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        product_id: GUMROAD_PRODUCT_ID,
+        [paramName]: GUMROAD_PRODUCT_ID,
         license_key: key,
         increment_uses_count: increment ? 'true' : 'false',
       }),
     });
-    const data = await resp.json();
-    if (!data.success) return { ok: false, why: 'key not recognized' };
+    return { data: await resp.json() };
+  } catch {
+    return { netErr: true };
+  }
+}
+
+// GUMROAD_PRODUCT_ID may hold EITHER the product's permalink (the easy-to-find
+// short slug, e.g. "kgbop") OR the long product_id. Gumroad's verify API keys
+// on different param names for each, so try product_id first, then
+// product_permalink — whichever the value actually is, one matches. Only the
+// SUCCEEDING call increments the use count (a wrong param name just returns
+// success:false without touching it).
+async function verifyGumroadLicense(key, { increment = false } = {}) {
+  if (GUMROAD_TEST_KEY && key === GUMROAD_TEST_KEY) return { ok: true, saleId: 'test_sale' };
+  if (!GUMROAD_PRODUCT_ID) return { ok: false, why: 'purchases not configured yet' };
+  let netFailed = false;
+  for (const paramName of ['product_id', 'product_permalink']) {
+    const { data, netErr } = await gumroadVerifyOnce(paramName, key, increment);
+    if (netErr) { netFailed = true; continue; }
+    if (!data || !data.success) continue;   // wrong param name or bad key — try the next form
     const p = data.purchase || {};
     if (p.refunded || p.chargebacked || p.disputed) return { ok: false, why: 'that purchase was refunded' };
     if (increment && (p.uses || 0) > REDEEM_USE_CAP) return { ok: false, why: 'key already used on too many devices' };
     return { ok: true, saleId: p.sale_id || p.id || key };
-  } catch {
-    return { ok: false, why: 'could not reach Gumroad — try again in a minute' };
   }
+  return netFailed
+    ? { ok: false, why: 'could not reach Gumroad — try again in a minute' }
+    : { ok: false, why: 'key not recognized' };
 }
 
 // Live-unlock: after a grant, any connected socket on that account learns

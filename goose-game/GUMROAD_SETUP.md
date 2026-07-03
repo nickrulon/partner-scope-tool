@@ -64,8 +64,8 @@ Render dashboard → your service → Environment → add:
 | Key | Value |
 |---|---|
 | `GOOSE_GATE_WEB` | `1` |
-| `GOOSE_GUMROAD_PRODUCT_ID` | the Product ID from step 1.4 |
-| `GOOSE_GUMROAD_URL` | your product URL, e.g. `https://YOURNAME.gumroad.com/l/goosehostpass` |
+| `GOOSE_GUMROAD_PRODUCT_ID` | the product **permalink** — the short slug in your product URL (e.g. `kgbop`). The long product_id also works, but the permalink is far easier to find. |
+| `GOOSE_GUMROAD_URL` | your full product URL, e.g. `https://nickster612.gumroad.com/l/kgbop` |
 
 Save → the service redeploys → hosting is now gated. To un-launch at any
 time, delete `GOOSE_GATE_WEB` and everything is free again. Nothing else
