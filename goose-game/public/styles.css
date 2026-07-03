@@ -154,7 +154,9 @@ input::placeholder { color: #9a8d6e; }
    keep taps/buttons thumb-friendly. */
 @media (max-width: 560px) {
   .lobby { align-items: flex-start; padding: 16px; }
-  .lobby .lobby-inner { padding-bottom: 28px; }
+  /* clear the fixed sound pill so it never sits on the title */
+  .lobby .lobby-inner { padding-top: 40px; padding-bottom: 28px; }
+  .menu-sound { top: 8px; right: 8px; font-size: .68rem; padding: 6px 10px; }
   .lh-msgs { height: 72px; }
   .nudge-btn { padding: 11px 8px; }
   .vote-card { padding: 11px 12px; }
