@@ -149,12 +149,11 @@ async function pump() {
 }
 
 // ---- continuous scribble loop ----
-// One looping source per stroke: started on pointer-down, silent until the
-// crayon actually MOVES (each move swells the gain, then it self-fades ~150ms
-// after the last move — hold still and the paper goes quiet, like real life).
-// A slight random playback rate per stroke keeps the loop from sounding
-// robotic. Missing sounds/scribble.<ext> = silently no-op, like every clip.
-let scrib = null;   // { src, gain } while a stroke is live
+// One looping source per stroke: started on pointer-down, swells in fast and
+// plays steadily for the whole stroke, fading out on release. A slight random
+// playback rate per stroke keeps the loop from sounding robotic. Missing
+// sounds/scribble.<ext> = silently no-op, like every clip.
+let scrib = null;   // { src, gain, level } while a stroke is live
 
 export function startScribble() {
   if (muted) return;
@@ -167,37 +166,46 @@ export function startScribble() {
     const src = c.createBufferSource();
     src.buffer = buf;
     src.loop = true;
-    src.playbackRate.value = 0.94 + Math.random() * 0.12;
+    src.playbackRate.value = 0.94 + Math.random() * 0.12;   // organic, per-stroke
     const gain = c.createGain();
-    gain.gain.value = 0;                    // silent until the first move
+    const now = c.currentTime;
+    const level = clampVol(volume) * 0.9;   // paper-scratch needs headroom to be heard
+    // Reliable linear swell-in (the old movement-gated setTargetAtTime
+    // envelope left the loop stuck silent).
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(level, now + 0.05);
     src.connect(gain).connect(c.destination);
     src.start(0);
-    scrib = { src, gain };
+    scrib = { src, gain, level };
   } catch { /* ignore */ }
 }
 
+// Pin the loop at full level as the crayon moves (also picks up a live
+// volume-slider change mid-stroke). The stroke plays steadily start to
+// finish — simpler and far more reliable than movement-gated gain.
 export function scribbleMove() {
   if (!scrib || muted) return;
   const c = getCtx();
   if (!c) return;
+  scrib.level = clampVol(volume) * 0.9;
   const g = scrib.gain.gain;
   const now = c.currentTime;
   g.cancelScheduledValues(now);
-  g.setTargetAtTime(clampVol(volume) * 0.55, now, 0.03);   // swell in (subtle: 55% of master)
-  g.setTargetAtTime(0, now + 0.15, 0.08);                  // auto-fade after the last move
+  g.setValueAtTime(scrib.level, now);
 }
 
 export function stopScribble(immediate = false) {
   if (!scrib) return;
-  const { src, gain } = scrib;
+  const { src, gain, level } = scrib;
   scrib = null;
   try {
     const c = getCtx();
     const now = c ? c.currentTime : 0;
     if (!immediate && c) {
       gain.gain.cancelScheduledValues(now);
-      gain.gain.setTargetAtTime(0, now, 0.03);   // soft lift-off, no click
-      src.stop(now + 0.12);
+      gain.gain.setValueAtTime(level || 0.0001, now);
+      gain.gain.linearRampToValueAtTime(0, now + 0.08);   // soft lift-off, no click
+      src.stop(now + 0.1);
     } else {
       src.stop();
     }
