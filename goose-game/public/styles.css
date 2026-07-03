@@ -376,6 +376,9 @@ input::placeholder { color: #9a8d6e; }
 .dd-weight span { display: block; border-radius: 50%; background: var(--ink); }
 .dd-mini { font-size: .78rem; padding: 6px 12px; color: var(--ink); border-color: var(--ink); }
 .dd-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+/* ghost buttons sit on cream paper in the editor — give them ink so
+   "Cancel" is actually legible */
+.doodle-box .btn-ghost { color: var(--ink); border-color: var(--ink); }
 
 /* ---------- pond graffiti (doodle the table) ---------- */
 /* Zone canvases sit at z1; every real UI element in a zone is lifted to z2+
@@ -402,13 +405,16 @@ input::placeholder { color: #9a8d6e; }
 }
 
 /* marker-mode toggle — bottom-LEFT above Leave Game, clear of the right
-   rail's volume slider */
+   rail's volume slider. z sits BELOW the Log & Chat toggle (110) and all
+   modals, so it never covers other controls. */
 .pond-btn {
-  position: fixed; left: 14px; bottom: 64px; z-index: 111;
+  position: fixed; left: 14px; bottom: 64px; z-index: 105;
   background: var(--cream); color: var(--ink); border-color: var(--paper-edge);
   font-weight: bold; text-transform: uppercase; letter-spacing: .04em;
   box-shadow: 0 4px 12px rgba(0,0,0,.5);
 }
+/* while a card-doodle editor is open, get out of the way entirely */
+body.card-editor-open .pond-btn { display: none; }
 .pond-btn:hover { border-color: var(--bill); }
 body.pond-mode .pond-btn { background: var(--bill); color: #2a1500; border-color: var(--bill-dark); }
 /* full-screen crayon capture — sits UNDER threat/win overlays (z100+) so a
@@ -423,6 +429,12 @@ body.pond-mode .pond-btn { background: var(--bill); color: #2a1500; border-color
 @media (max-width: 1040px) {
   .pond-bar { bottom: 106px; }
   .pond-btn { left: 10px; bottom: 12px; }
+  /* On phones, the floating your-turn bar pops at the TOP so it never sits on
+     the doodle tools (it's also draggable anywhere — grab the chip). */
+  body.my-turn.doodling-surface .stage-actions:not(:empty) {
+    bottom: auto; top: max(10px, env(safe-area-inset-top));
+    left: 8px; right: 8px; border-radius: 12px;
+  }
 }
 /* eraser mode: swap the crosshair for a "rubbing" cursor + highlight */
 body.pond-erasing .pond-capture { cursor: cell; }
@@ -440,7 +452,8 @@ body.pond-erasing .pond-capture { cursor: cell; }
    announced by a pulsing "yer turn" chip — and the draw reveal flies above
    the doodle UI too, so you draw, watch it land, and keep doodling. */
 body.pond-mode .stage-actions { z-index: 97; }              /* pond: buttons above the capture layer */
-body.my-turn.doodling-surface .stage-actions { z-index: 140; }   /* your turn: above card editors too (z135) */
+body.my-turn.doodling-surface .stage-actions { z-index: 140; cursor: grab; touch-action: none; }   /* your turn: above card editors too (z135); grab = draggable */
+body.my-turn.doodling-surface .stage-actions:active { cursor: grabbing; }
 body.doodling-surface .fly-layer { z-index: 145; }          /* card reveal above any doodle surface */
 body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
   content: "it's yer turn!";
@@ -525,6 +538,15 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .overlay-controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 560px; animation: fadeIn .3s .5s both; }
 .overlay-controls .btn { font-size: 1rem; }
 .overlay-msg { color: var(--cream); font-family: var(--type); font-size: 1.1rem; }
+
+/* ---------- menu sound toggle (lobby + waiting room) ---------- */
+.menu-sound {
+  position: fixed; top: 12px; right: 12px; z-index: 60;
+  background: var(--cream); color: var(--ink); border-color: var(--paper-edge);
+  font-size: .8rem; padding: 8px 14px; text-transform: uppercase; letter-spacing: .05em;
+  box-shadow: 0 3px 10px rgba(0,0,0,.4);
+}
+.menu-sound:hover { border-color: var(--bill); }
 
 /* ---------- solo button + Host Pass sheet ---------- */
 .solo-btn { background: #fbf6e7; color: var(--ink); border-color: var(--paper-edge); margin-top: 8px; }

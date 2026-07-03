@@ -220,6 +220,7 @@ function nudgeBanner(text) {
 // ---- sound controls ----
 function syncSoundUI() {
   $('soundToggle').textContent = isMuted() ? 'SOUND: OFF' : 'SOUND: ON';
+  $('menuSound').textContent = isMuted() ? 'Sound: Off' : 'Sound: On';
   $('muteToggle').checked = isMuted();
   $('volSlider').value = Math.round(getVolume() * 100);
 }
@@ -248,6 +249,7 @@ $('leaveBtn').onclick = () => {
   showScreen('lobby');
 };
 $('soundToggle').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isMuted()) playSound('click'); };
+$('menuSound').onclick = () => { setMuted(!isMuted()); syncSoundUI(); if (!isMuted()) playSound('click'); };
 $('muteToggle').onchange = (e) => { setMuted(e.target.checked); syncSoundUI(); };
 $('volSlider').oninput = (e) => { setVolume(e.target.value / 100); };
 $('volSlider').onchange = () => playSound('click');
@@ -296,7 +298,12 @@ function showHostPassSheet() {
 }
 
 // ---- top-level render ----
-function showScreen(id) { ['lobby', 'waiting', 'game'].forEach((s) => $(s).classList.toggle('hidden', s !== id)); }
+function showScreen(id) {
+  ['lobby', 'waiting', 'game'].forEach((s) => $(s).classList.toggle('hidden', s !== id));
+  // Menu sound toggle lives on the home screen + waiting room; in-game the
+  // topbar/Sounds panel takes over.
+  $('menuSound').classList.toggle('hidden', id === 'game');
+}
 function rerender() { if (view) render(); }
 
 function render() {
@@ -811,8 +818,49 @@ function doodleLayer(doodle, res = 300) {
 // editor). While it's on AND it's your turn, the action buttons float above
 // the doodle UI with a "yer turn" chip so the table never waits on an artist.
 function syncDoodleSurface() {
-  document.body.classList.toggle('doodling-surface', pondMode || !!document.querySelector('.doodle-modal'));
+  const editorOpen = !!document.querySelector('.doodle-modal');
+  const on = pondMode || editorOpen;
+  document.body.classList.toggle('doodling-surface', on);
+  document.body.classList.toggle('card-editor-open', editorOpen);   // hides the pond toggle behind the editor
+  if (!on) resetActionsDrag();   // leaving doodle mode → bar returns to its home position
 }
+
+// While a doodle surface is open, the floating your-turn bar can be DRAGGED
+// out of the way — grab anywhere that isn't a button (the chip works great).
+let actionsDrag = null;   // persisted offset {x, y}
+function resetActionsDrag() {
+  actionsDrag = null;
+  $('stageActions').style.transform = '';
+}
+(() => {
+  const bar = $('stageActions');
+  let start = null;
+  bar.addEventListener('pointerdown', (e) => {
+    if (!document.body.classList.contains('doodling-surface')) return;
+    if (e.target.closest('.btn')) return;   // buttons stay buttons
+    e.preventDefault();
+    try { bar.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
+    const cur = actionsDrag || { x: 0, y: 0 };
+    start = { px: e.clientX, py: e.clientY, x: cur.x, y: cur.y };
+  });
+  bar.addEventListener('pointermove', (e) => {
+    if (!start) return;
+    e.preventDefault();
+    const r = bar.getBoundingClientRect();
+    let x = start.x + (e.clientX - start.px);
+    let y = start.y + (e.clientY - start.py);
+    // keep at least a strip of the bar on screen
+    const curX = actionsDrag?.x ?? start.x, curY = actionsDrag?.y ?? start.y;
+    const left = r.left - curX + x, top = r.top - curY + y;
+    if (left < -r.width + 60) x = curX; if (left > window.innerWidth - 60) x = curX;
+    if (top < 0) y = curY; if (top > window.innerHeight - 40) y = curY;
+    actionsDrag = { x, y };
+    bar.style.transform = `translate(${x}px, ${y}px)`;
+  });
+  const end = () => { start = null; };
+  bar.addEventListener('pointerup', end);
+  bar.addEventListener('pointercancel', end);
+})();
 
 // Force-close any open card-doodle editors, SAVING their strokes first — used
 // when a turn action (trade, mow) needs the table back. Art is never lost.
