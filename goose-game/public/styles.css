@@ -559,6 +559,8 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .pass-note { font-size: .78rem; color: var(--ink-soft); text-align: center; }
 .pass-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .pass-actions .btn-ghost { color: var(--ink); border-color: var(--ink); }
+.pass-redeem { display: flex; gap: 8px; }
+.pass-redeem .pass-key { flex: 1; min-width: 0; font-size: .85rem; }
 
 /* ---------- toast ---------- */
 .toast {

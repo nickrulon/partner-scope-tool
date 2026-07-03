@@ -125,10 +125,19 @@ function connect() {
     else if (type === 'account') {
       // Server-confirmed identity + owned products.
       if (payload.accountId) { accountId = payload.accountId; localStorage.setItem(ACCT_KEY, accountId); }
+      const hadPass = myEntitlements.includes('host_pass');
       myEntitlements = payload.entitlements || [];
+      // Live unlock: a purchase (Gumroad Ping) or key redemption landed while
+      // this tab was open — celebrate and clear the upgrade sheet.
+      if (!hadPass && myEntitlements.includes('host_pass')) {
+        const sheet = document.querySelector('.pass-modal');
+        if (sheet) sheet.remove();
+        playSound('win');
+        toast('HOST PASS ACTIVE — go create yer pond!');
+      }
     }
     else if (type === 'error') {
-      if (payload.code === 'NEED_HOST_PASS') { showHostPassSheet(); return; }
+      if (payload.code === 'NEED_HOST_PASS') { showHostPassSheet(payload.buyUrl); return; }
       toast(payload.message); $('lobbyErr').textContent = payload.message;
       if (/no room with that code/i.test(payload.message)) localStorage.removeItem(ROOM_KEY); // stale room — don't keep retrying
     }
@@ -259,7 +268,7 @@ $('volSlider').onchange = () => playSound('click');
 // multiplayer room. The actual StoreKit purchase is wired via the
 // window.GoosePurchase adapter (installed by the app shell); on the web this
 // sheet never appears because web hosting isn't gated.
-function showHostPassSheet() {
+function showHostPassSheet(buyUrl) {
   document.querySelectorAll('.pass-modal').forEach((m) => m.remove());
   const wrap = document.createElement('div');
   wrap.className = 'overlay pass-modal';
@@ -279,17 +288,37 @@ function showHostPassSheet() {
   const buy = btn('Get the Host Pass — $2.99', 'btn-primary', async () => {
     if (window.GoosePurchase && window.GoosePurchase.buyHostPass) {
       try { await window.GoosePurchase.buyHostPass(); } catch { /* user cancelled */ }
+    } else if (buyUrl) {
+      // Gumroad checkout in a new tab; the Ping webhook unlocks this tab
+      // automatically the moment the sale lands.
+      window.open(buyUrl, '_blank');
+      toast('After you buy, this unlocks by itself — or paste your license key below.');
     } else {
-      toast('Purchases work in the app — this is the free web pond, where hosting is free anyway!');
-    }
-  });
-  const restore = btn('Restore purchase', 'btn-ghost', async () => {
-    if (window.GoosePurchase && window.GoosePurchase.restore) {
-      try { await window.GoosePurchase.restore(); } catch { /* ignore */ }
+      toast('Purchases aren\'t switched on yet — hang tight!');
     }
   });
   row.appendChild(buy);
-  row.appendChild(restore);
+  // Restore path: paste the license key from the Gumroad receipt (new
+  // browser, cleared storage, or the webhook missed).
+  const redeemRow = document.createElement('div');
+  redeemRow.className = 'pass-redeem';
+  const input = document.createElement('input');
+  input.className = 'pass-key';
+  input.placeholder = 'Already bought? Paste license key';
+  input.maxLength = 64;
+  const redeem = btn('Redeem', '', () => {
+    const k = input.value.trim();
+    if (k) sendWs('redeem', { key: k });
+  });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') redeem.click(); });
+  redeemRow.appendChild(input);
+  redeemRow.appendChild(redeem);
+  row.appendChild(redeemRow);
+  if (window.GoosePurchase && window.GoosePurchase.restore) {
+    row.appendChild(btn('Restore purchase', 'btn-ghost', async () => {
+      try { await window.GoosePurchase.restore(); } catch { /* ignore */ }
+    }));
+  }
   row.appendChild(btn('Not now', 'btn-ghost', () => wrap.remove()));
   box.appendChild(row);
   wrap.appendChild(box);

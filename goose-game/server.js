@@ -44,6 +44,28 @@ const httpServer = http.createServer((req, res) => {
   }
   if (req.url === '/healthz') { res.writeHead(200); return res.end('honk'); }
 
+  // Gumroad Ping: fires on every sale of the Host Pass. Always answer 200
+  // (Gumroad retries otherwise); the license verify guards against fakes.
+  if (req.method === 'POST' && req.url.startsWith('/gumroad/ping')) {
+    let body = '';
+    req.on('data', (c) => { body += c; if (body.length > 100_000) req.destroy(); });
+    req.on('end', async () => {
+      res.writeHead(200); res.end('ok');
+      try {
+        const p = new URLSearchParams(body);
+        const key = p.get('license_key');
+        const accountId = p.get('url_params[accountId]') || p.get('accountId');
+        if (!key || !accountId || !/^a_[a-z0-9]{6,32}$/i.test(accountId)) return;
+        const v = await verifyGumroadLicense(key);
+        if (!v.ok) return;
+        if (grantEntitlement(accountId, 'host_pass', { platform: 'web', txnId: `gum_${v.saleId}` })) {
+          pushAccount(accountId);   // the buyer's open tab unlocks on the spot
+        }
+      } catch { /* malformed ping — verified sales can still redeem by key */ }
+    });
+    return;
+  }
+
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
   if (urlPath === '/') urlPath = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC, urlPath));
@@ -327,6 +349,7 @@ function handle(ws, type, payload) {
     case 'leave':     return doLeave(ws, payload);
     case 'nudge':     return doNudge(ws, payload);
     case 'pond':      return doPond(ws, payload);
+    case 'redeem':    return doRedeem(ws, payload);
     case 'rematch':   return doRematch(ws, payload);
     case 'chat':      return doChat(ws, payload);
     default: send(ws, 'error', { message: `unknown message ${type}` });
@@ -334,7 +357,8 @@ function handle(ws, type, payload) {
 }
 
 function joinRoom(ws, room, playerId, name) {
-  ws.meta = { roomCode: room.code, playerId };
+  // Preserve account identity (hello) — replacing meta wholesale wiped it.
+  ws.meta = { ...ws.meta, roomCode: room.code, playerId, isSpectator: false };
   room.members.set(playerId, { playerId, name, ws });
   scheduleReap(room);   // a human is here — cancel any pending reap
   if (room.game) {
@@ -393,15 +417,81 @@ function doHello(ws, { accountId, platform }) {
   send(ws, 'account', { accountId: id, platform: plat, entitlements: getEntitlements(id) });
 }
 
-const needsHostPass = (ws) => ws.meta.platform === 'ios' && !hasEntitlement(ws.meta.accountId, 'host_pass');
+// --- Gumroad (web Host Pass checkout) --------------------------------------
+// Gumroad is the merchant of record (their liability shield was the point).
+// Two grant paths, both replay-safe:
+//   1. Ping webhook: the upgrade sheet opens the Gumroad product URL with
+//      ?accountId=… ; Gumroad POSTs the sale to /gumroad/ping with that id in
+//      url_params → verify the license → grant → push the account live.
+//   2. Redeem: the buyer pastes the license key from their receipt (restore
+//      path for new browsers/devices) → verify (uses-capped) → grant.
+// Web gating stays OFF until GOOSE_GATE_WEB=1 — flipping it is the launch.
+const GATE_WEB = process.env.GOOSE_GATE_WEB === '1';
+const GUMROAD_PRODUCT_ID = process.env.GOOSE_GUMROAD_PRODUCT_ID || '';
+const GUMROAD_URL = process.env.GOOSE_GUMROAD_URL || '';
+const GUMROAD_TEST_KEY = process.env.GOOSE_GUMROAD_TEST_KEY || '';   // tests/dev only
+const REDEEM_USE_CAP = 5;   // one key restores on up to 5 browsers/devices
+
+async function verifyGumroadLicense(key, { increment = false } = {}) {
+  if (GUMROAD_TEST_KEY && key === GUMROAD_TEST_KEY) return { ok: true, saleId: 'test_sale' };
+  if (!GUMROAD_PRODUCT_ID) return { ok: false, why: 'purchases not configured yet' };
+  try {
+    const resp = await fetch('https://api.gumroad.com/v2/licenses/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        product_id: GUMROAD_PRODUCT_ID,
+        license_key: key,
+        increment_uses_count: increment ? 'true' : 'false',
+      }),
+    });
+    const data = await resp.json();
+    if (!data.success) return { ok: false, why: 'key not recognized' };
+    const p = data.purchase || {};
+    if (p.refunded || p.chargebacked || p.disputed) return { ok: false, why: 'that purchase was refunded' };
+    if (increment && (p.uses || 0) > REDEEM_USE_CAP) return { ok: false, why: 'key already used on too many devices' };
+    return { ok: true, saleId: p.sale_id || p.id || key };
+  } catch {
+    return { ok: false, why: 'could not reach Gumroad — try again in a minute' };
+  }
+}
+
+// Live-unlock: after a grant, any connected socket on that account learns
+// about it immediately (the upgrade sheet closes itself mid-session).
+function pushAccount(accountId) {
+  for (const client of wss.clients) {
+    if (client.meta?.accountId === accountId && client.readyState === client.OPEN) {
+      send(client, 'account', { accountId, platform: client.meta.platform, entitlements: getEntitlements(accountId) });
+    }
+  }
+}
+
+async function doRedeem(ws, { key }) {
+  const k = String(key || '').trim();
+  if (!k) return send(ws, 'error', { message: 'Paste yer license key first (it\'s in your Gumroad receipt).' });
+  if (!ws.meta.accountId) return send(ws, 'error', { message: 'Connection hiccup — refresh and try again.' });
+  const v = await verifyGumroadLicense(k, { increment: true });
+  if (!v.ok) return send(ws, 'error', { message: `That key didn't fly: ${v.why}.` });
+  grantEntitlement(ws.meta.accountId, 'host_pass', { platform: 'web', txnId: `gumkey_${k}_${ws.meta.accountId}`.slice(0, 190) });
+  pushAccount(ws.meta.accountId);
+}
+
+const needsHostPass = (ws) => (ws.meta.platform === 'ios' || GATE_WEB)
+  && !hasEntitlement(ws.meta.accountId, 'host_pass');
 
 function doCreate(ws, { name, playerId, solo }) {
   // "Host owns the room": on iOS, creating a MULTIPLAYER room requires the
   // Host Pass. Solo ponds (you + computer geese) are free for everyone —
   // that's the try-before-you-buy experience.
   if (!solo && needsHostPass(ws)) {
+    // buyUrl carries the buyer's account id so the Gumroad Ping can grant
+    // the pass to the right goose automatically.
+    const buyUrl = GUMROAD_URL
+      ? `${GUMROAD_URL}${GUMROAD_URL.includes('?') ? '&' : '?'}accountId=${encodeURIComponent(ws.meta.accountId || '')}&wanted=true`
+      : null;
     return send(ws, 'error', {
       code: 'NEED_HOST_PASS',
+      buyUrl,
       message: 'Hosting yer own pond takes a Host Pass. You can still join any pond with a code, or play the computer for free.',
     });
   }
@@ -445,7 +535,7 @@ function doJoin(ws, { code, name, playerId }) {
       return send(ws, 'error', { message: `"${seat.name}" is still connected — that seat isn't up for grabs.` });
     }
     if (seat) {
-      ws.meta = { roomCode: room.code, playerId: seat.id };   // adopt the existing seat id
+      ws.meta = { ...ws.meta, roomCode: room.code, playerId: seat.id, isSpectator: false };   // adopt the existing seat id, keep account identity
       room.members.set(seat.id, { playerId: seat.id, name: seat.name, ws });
       scheduleReap(room);
       seat.connected = true;
@@ -476,7 +566,7 @@ function doSpectate(ws, { code, name, playerId }) {
   if (!room) return send(ws, 'error', { message: 'No room with that code to watch.' });
   const sid = (typeof playerId === 'string' && playerId.startsWith('s_'))
     ? playerId : `s_${Math.random().toString(36).slice(2, 9)}`;
-  ws.meta = { roomCode: room.code, playerId: sid, isSpectator: true };
+  ws.meta = { ...ws.meta, roomCode: room.code, playerId: sid, isSpectator: true };   // keep account identity
   // De-dupe watcher names ("Spectator", "Spectator 2", …) so the birdwatchers
   // strip stays readable.
   const base = ((name || '').trim() || 'Spectator').slice(0, 20);

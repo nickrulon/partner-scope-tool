@@ -1,5 +1,10 @@
 # Quit Goosin' Around! — iOS App Plan
 
+> **STATUS UPDATE:** iOS phases are PAUSED (Apple budget deferred). The Host
+> Pass launched on the WEB instead via Gumroad — see `GUMROAD_SETUP.md`. All
+> infrastructure below is shared; the iOS plan resumes unchanged when the
+> game has earned its $99.
+
 The game ships to the Apple App Store as a **free app** with a **$2.99 one-time
 Host Pass** in-app purchase, and expansion packs as future IAPs. The website
 stays fully free (demo/growth channel) and is never mentioned inside the app.

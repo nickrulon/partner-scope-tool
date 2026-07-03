@@ -18,10 +18,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // --- tiny ws test client ---------------------------------------------------
 
 class Client {
-  constructor(label) { this.label = label; this.msgs = []; this.waiters = []; }
+  constructor(label, port = PORT) { this.label = label; this.port = port; this.msgs = []; this.waiters = []; }
   connect() {
     return new Promise((res, rej) => {
-      this.ws = new WebSocket(`ws://localhost:${PORT}`);
+      this.ws = new WebSocket(`ws://localhost:${this.port}`);
       this.ws.on('open', res);
       this.ws.on('error', rej);
       this.ws.on('message', (raw) => {
@@ -60,7 +60,7 @@ class Client {
 
 const isState = (pred) => (m) => m.type === 'state' && pred(m.payload);
 
-async function newClient(label) { const c = new Client(label); await c.connect(); return c; }
+async function newClient(label, port = PORT) { const c = new Client(label, port); await c.connect(); return c; }
 
 // Create a room with `names.length` clients, everyone votes for the first
 // goose, and (optionally) the host starts the game. Returns clients + ids.
@@ -291,6 +291,67 @@ try {
     const bad = await fetch(`http://localhost:${PORT}/dev/grant?secret=wrong&account=a_x&product=host_pass`, { method: 'POST' });
     ok(bad.status === 403, 'dev grant refuses a bad secret');
     ios.close(); web.close();
+  }
+
+  console.log('\n== Gumroad launch mode: web gated, buy URL, redeem, ping webhook ==');
+  {
+    // A second server with the web gate FLIPPED ON (how production will run
+    // once Nick's Gumroad product is live) + a test license key.
+    const GPORT = PORT + 1;
+    const gated = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+      env: {
+        ...process.env,
+        GOOSE_PORT: String(GPORT), GOOSE_DB: ':memory:',
+        GOOSE_GATE_WEB: '1',
+        GOOSE_GUMROAD_TEST_KEY: 'HONK-HONK-SON',
+        GOOSE_GUMROAD_URL: 'https://nick.gumroad.com/l/hostpass',
+      },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    });
+    await new Promise((res2, rej2) => {
+      const t = setTimeout(() => rej2(new Error('gated server did not boot')), 8000);
+      gated.stdout.on('data', (d) => { if (String(d).includes('running at')) { clearTimeout(t); res2(); } });
+    });
+    try {
+      const web = await newClient('gatedweb', GPORT);
+      web.send('hello', { accountId: 'a_webbuyer001', platform: 'web' });
+      await web.wait((m) => m.type === 'account', 'hello');
+      // Gated: create refused, with a buy URL carrying the account id.
+      web.send('create', { name: 'Buyer' });
+      const gate = await web.wait((m) => m.type === 'error' && m.payload.code === 'NEED_HOST_PASS', 'web create gated');
+      ok(/accountId=a_webbuyer001/.test(gate.payload.buyUrl), 'upgrade sheet gets a Gumroad URL tagged with the account');
+      // Solo still free even when the web is gated.
+      web.send('create', { name: 'Buyer', solo: true });
+      await web.wait((m) => m.type === 'joined', 'solo still free');
+      ok(true, 'solo ponds stay free with the gate on');
+      web.send('leave', {});
+      // Bad license key → rejected.
+      web.send('redeem', { key: 'TOTALLY-FAKE' });
+      const bad = await web.wait((m) => m.type === 'error' && /didn't fly/i.test(m.payload.message), 'bad key rejected');
+      ok(!!bad, 'a fake license key is rejected');
+      // Good key → live account push with the entitlement → create works.
+      web.send('redeem', { key: 'HONK-HONK-SON' });
+      await web.wait((m) => m.type === 'account' && m.payload.entitlements.includes('host_pass'), 'live unlock push');
+      ok(true, 'redeeming the license key unlocks the pass live');
+      web.send('create', { name: 'Buyer' });
+      await web.wait((m) => m.type === 'joined' && !m.payload.spectator, 'create now allowed');
+      ok(true, 'gated web client can host after redeeming');
+      // Ping webhook: a sale for a DIFFERENT account grants it automatically.
+      const ping = await fetch(`http://localhost:${GPORT}/gumroad/ping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'license_key=HONK-HONK-SON&url_params%5BaccountId%5D=a_pingbuyer01&sale_id=s1',
+      });
+      ok(ping.ok, 'ping endpoint answers 200');
+      await sleep(300);   // grant is async after the 200
+      const buyer2 = await newClient('pingbuyer', GPORT);
+      buyer2.send('hello', { accountId: 'a_pingbuyer01', platform: 'web' });
+      await buyer2.wait((m) => m.type === 'account' && m.payload.entitlements.includes('host_pass'), 'ping granted the pass');
+      ok(true, 'Gumroad Ping auto-grants the pass to the tagged account');
+      web.close(); buyer2.close();
+    } finally {
+      gated.kill();
+    }
   }
 
   console.log('\n== Empty rooms are reaped ==');
