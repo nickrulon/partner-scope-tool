@@ -373,7 +373,16 @@ function resetTransient(opts = {}) {
 }
 
 function renderWaiting() {
-  $('roomCode').textContent = view.code;
+  // Solo ponds are private practice vs the computers — the server refuses
+  // human joins, so don't advertise a code or invite link that can't work.
+  if (view.solo) {
+    $('codePill').innerHTML = 'Solo pond — you vs. the computers';
+    $('copyLinkBtn').classList.add('hidden');
+  } else {
+    $('codePill').innerHTML = 'Room <strong id="roomCode"></strong>';
+    $('roomCode').textContent = view.code;
+    $('copyLinkBtn').classList.remove('hidden');
+  }
   const isHost = playerId === view.hostId;
   const votes = view.votes || {};            // voterId -> candidateId
   const myVote = votes[playerId] || null;
@@ -480,7 +489,7 @@ const isMyTurn = () => view.game.turnPlayerId === playerId;
 
 function renderGame() {
   const g = view.game;
-  $('gRoomName').textContent = view.code;
+  $('gRoomName').textContent = view.solo ? 'Solo Pond' : view.code;
   $('gPlayerCount').textContent = `${g.players.length} geese`;
   // Spectator badge in the top bar; Log & Chat toggle shows in-game for everyone
   // (CSS only displays it on mobile).
