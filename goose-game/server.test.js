@@ -305,6 +305,7 @@ try {
         GOOSE_GATE_WEB: '1',
         GOOSE_GUMROAD_TEST_KEY: 'HONK-HONK-SON',
         GOOSE_GUMROAD_URL: 'https://nick.gumroad.com/l/hostpass',
+        GOOSE_FRIEND_CODE: 'GOOSEGANG, pondpals',
       },
       stdio: ['ignore', 'pipe', 'inherit'],
     });
@@ -349,6 +350,24 @@ try {
       await buyer2.wait((m) => m.type === 'account' && m.payload.entitlements.includes('host_pass'), 'ping granted the pass');
       ok(true, 'Gumroad Ping auto-grants the pass to the tagged account');
       web.close(); buyer2.close();
+      // Friend codes: passwords that skip Gumroad entirely (friends & family).
+      // Case-insensitive, and the comma-separated env list is trimmed.
+      const pal = await newClient('friendpal', GPORT);
+      pal.send('hello', { accountId: 'a_friendpal01', platform: 'web' });
+      await pal.wait((m) => m.type === 'account', 'friend hello');
+      pal.send('redeem', { key: 'goosegang' });
+      await pal.wait((m) => m.type === 'account' && m.payload.entitlements.includes('host_pass'), 'friend code granted');
+      ok(true, 'friend code GOOSEGANG grants the pass (case-insensitive, no Gumroad)');
+      pal.send('create', { name: 'Pal' });
+      await pal.wait((m) => m.type === 'joined' && !m.payload.spectator, 'friend can host');
+      ok(true, 'friend-code holder can create ponds');
+      const pal2 = await newClient('friendpal2', GPORT);
+      pal2.send('hello', { accountId: 'a_friendpal02', platform: 'web' });
+      await pal2.wait((m) => m.type === 'account', 'friend2 hello');
+      pal2.send('redeem', { key: 'PONDPALS' });
+      await pal2.wait((m) => m.type === 'account' && m.payload.entitlements.includes('host_pass'), 'second code granted');
+      ok(true, 'multiple comma-separated friend codes work (whitespace trimmed)');
+      pal.close(); pal2.close();
     } finally {
       gated.kill();
     }

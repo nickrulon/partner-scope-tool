@@ -50,6 +50,25 @@ https://YOURNAME.gumroad.com/l/goosehostpass/YOURCODE
 
 Every freebie is tracked in your Gumroad dashboard; kill the code anytime.
 
+## 2.6 The friends & family door (friend codes — no Gumroad at all)
+
+Set `GOOSE_FRIEND_CODE` on Render to a password (or several,
+comma-separated): `GOOSEGANG` or `GOOSEGANG,POKERNIGHT`. Then either:
+
+- Friends type the code into the "License key or friend code" box on the
+  Host Pass sheet, **or**
+- You text them the magic link — it unlocks hosting automatically on arrival,
+  zero typing:
+
+```
+https://quitgoosinaround.com/?friend=GOOSEGANG
+```
+
+Codes are case-insensitive. Rotate or kill one anytime by editing the env
+var (a leaked code can't be un-granted from people who already used it, but
+it stops working for new people immediately). Friend grants are stored with
+a `friend_` transaction prefix, so they're distinguishable from real sales.
+
 ## 3. Flip the switch on Render
 
 **⚠ Do this at the same time: upgrade the Render instance.** The free tier's

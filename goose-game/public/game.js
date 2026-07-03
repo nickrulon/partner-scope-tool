@@ -127,6 +127,12 @@ function connect() {
       if (payload.accountId) { accountId = payload.accountId; localStorage.setItem(ACCT_KEY, accountId); }
       const hadPass = myEntitlements.includes('host_pass');
       myEntitlements = payload.entitlements || [];
+      // Magic friend link (?friend=CODE): auto-redeem once, right after the
+      // server confirms who we are — zero typing for friends & family.
+      if (pendingFriendCode && !myEntitlements.includes('host_pass')) {
+        sendWs('redeem', { key: pendingFriendCode });
+        pendingFriendCode = null;
+      }
       // Live unlock: a purchase (Gumroad Ping) or key redemption landed while
       // this tab was open — celebrate and clear the upgrade sheet.
       if (!hadPass && myEntitlements.includes('host_pass')) {
@@ -304,7 +310,7 @@ function showHostPassSheet(buyUrl) {
   redeemRow.className = 'pass-redeem';
   const input = document.createElement('input');
   input.className = 'pass-key';
-  input.placeholder = 'Already bought? Paste license key';
+  input.placeholder = 'License key or friend code';
   input.maxLength = 64;
   const redeem = btn('Redeem', '', () => {
     const k = input.value.trim();
@@ -1858,6 +1864,12 @@ if (urlRoom) {
   $('nameInput').focus();
   toast(`Yer invited to pond ${urlRoom} — pick a name (or don't) and tap Join!`);
 }
+
+// ---- friend links (?friend=CODE) ----
+// A magic link that redeems a friend code automatically on arrival — the
+// account handler fires it once the server confirms our identity. Friends
+// click one link and they're hosts; no Gumroad, no typing.
+let pendingFriendCode = (new URLSearchParams(location.search).get('friend') || '').trim() || null;
 
 initAudio();
 syncSoundUI();

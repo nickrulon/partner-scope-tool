@@ -432,6 +432,18 @@ const GUMROAD_URL = process.env.GOOSE_GUMROAD_URL || '';
 const GUMROAD_TEST_KEY = process.env.GOOSE_GUMROAD_TEST_KEY || '';   // tests/dev only
 const REDEEM_USE_CAP = 5;   // one key restores on up to 5 browsers/devices
 
+// Friend codes: passwords that grant the Host Pass directly, skipping Gumroad
+// entirely — the friends & family door. Comma-separated in GOOSE_FRIEND_CODE
+// (e.g. "GOOSEGANG" or "GOOSEGANG,POKERNIGHT"), case-insensitive. Friends
+// type one into the redeem box, or just open ?friend=CODE which redeems
+// automatically. Rotate or kill codes by editing the env var. Grants are
+// recorded with a friend_ txn prefix so they're distinguishable from sales
+// in the entitlements table.
+const FRIEND_CODES = new Set(
+  (process.env.GOOSE_FRIEND_CODE || '')
+    .split(',').map((c) => c.trim().toUpperCase()).filter(Boolean),
+);
+
 // One verify attempt against Gumroad, identifying the product by a given
 // param name. Returns { data } on a completed HTTP call, or { netErr } if the
 // request itself failed.
@@ -490,6 +502,14 @@ async function doRedeem(ws, { key }) {
   const k = String(key || '').trim();
   if (!k) return send(ws, 'error', { message: 'Paste yer license key first (it\'s in your Gumroad receipt).' });
   if (!ws.meta.accountId) return send(ws, 'error', { message: 'Connection hiccup — refresh and try again.' });
+  // Friend code? Grant directly — no Gumroad involved.
+  if (FRIEND_CODES.has(k.toUpperCase())) {
+    grantEntitlement(ws.meta.accountId, 'host_pass', {
+      platform: 'web',
+      txnId: `friend_${k.toUpperCase()}_${ws.meta.accountId}`.slice(0, 190),
+    });
+    return pushAccount(ws.meta.accountId);
+  }
   const v = await verifyGumroadLicense(k, { increment: true });
   if (!v.ok) return send(ws, 'error', { message: `That key didn't fly: ${v.why}.` });
   grantEntitlement(ws.meta.accountId, 'host_pass', { platform: 'web', txnId: `gumkey_${k}_${ws.meta.accountId}`.slice(0, 190) });
