@@ -18,6 +18,7 @@ const SOUND_NAMES = [
   'lawnmower', 'getgoosed', 'goosegang', 'turn', 'win', 'lose',
   'trade', 'announce', 'goosed', 'goosednoannounce',
   'holler1', 'holler', 'holler2',
+  'scribble',   // looped while the crayon is moving (doodle editors + pond)
 ];
 const EXTS = ['mp3', 'ogg', 'wav', 'm4a'];
 
@@ -145,6 +146,62 @@ async function pump() {
     // Safety advance in case 'onended' is missed.
     setTimeout(next, (buf.duration * 1000) + 150);
   } catch { setTimeout(pump, 40); }
+}
+
+// ---- continuous scribble loop ----
+// One looping source per stroke: started on pointer-down, silent until the
+// crayon actually MOVES (each move swells the gain, then it self-fades ~150ms
+// after the last move — hold still and the paper goes quiet, like real life).
+// A slight random playback rate per stroke keeps the loop from sounding
+// robotic. Missing sounds/scribble.<ext> = silently no-op, like every clip.
+let scrib = null;   // { src, gain } while a stroke is live
+
+export function startScribble() {
+  if (muted) return;
+  const c = getCtx();
+  const buf = buffers.scribble;
+  if (!c || !buf) { loadBuffer('scribble'); return; }   // not ready → quiet this stroke
+  if (c.state === 'suspended') c.resume();
+  stopScribble(true);
+  try {
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    src.playbackRate.value = 0.94 + Math.random() * 0.12;
+    const gain = c.createGain();
+    gain.gain.value = 0;                    // silent until the first move
+    src.connect(gain).connect(c.destination);
+    src.start(0);
+    scrib = { src, gain };
+  } catch { /* ignore */ }
+}
+
+export function scribbleMove() {
+  if (!scrib || muted) return;
+  const c = getCtx();
+  if (!c) return;
+  const g = scrib.gain.gain;
+  const now = c.currentTime;
+  g.cancelScheduledValues(now);
+  g.setTargetAtTime(clampVol(volume) * 0.55, now, 0.03);   // swell in (subtle: 55% of master)
+  g.setTargetAtTime(0, now + 0.15, 0.08);                  // auto-fade after the last move
+}
+
+export function stopScribble(immediate = false) {
+  if (!scrib) return;
+  const { src, gain } = scrib;
+  scrib = null;
+  try {
+    const c = getCtx();
+    const now = c ? c.currentTime : 0;
+    if (!immediate && c) {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setTargetAtTime(0, now, 0.03);   // soft lift-off, no click
+      src.stop(now + 0.12);
+    } else {
+      src.stop();
+    }
+  } catch { /* already stopped */ }
 }
 
 // Map server fx event types -> sound names.

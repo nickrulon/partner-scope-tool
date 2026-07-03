@@ -4,6 +4,7 @@
 
 import {
   initAudio, playSound, enqueueSound, fxSound, drawSound, setMuted, isMuted, setVolume, getVolume,
+  startScribble, scribbleMove, stopScribble,
 } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -1001,6 +1002,7 @@ function openDoodleModal(cardId, onClose) {
     cur = { c: selColor, w: selWeight, p: [x, y] };
     const brush = brushFor(selColor, selWeight, cv.width);
     ctx.drawImage(brush, x / 1000 * cv.width - brush.width / 2, y / 1000 * cv.height - brush.width / 2);
+    startScribble();   // paper-scratch loop, silent until the crayon moves
   });
   cv.addEventListener('pointermove', (e) => {
     if (!cur) return;
@@ -1012,8 +1014,10 @@ function openDoodleModal(cardId, onClose) {
     cur.p.push(x, y);
     // live stamp (Math.random jitter is fine mid-stroke; repaint on release is seeded)
     stampSegment(ctx, cur, cur.p.length - 2, cv.width, cv.height, 0, 0, Math.random);
+    scribbleMove();
   });
   const endStroke = () => {
+    stopScribble();
     if (!cur) return;
     if (cur.p.length >= 4) { strokes.push(cur); totalPts += cur.p.length / 2; }
     cur = null;
@@ -1023,7 +1027,7 @@ function openDoodleModal(cardId, onClose) {
   cv.addEventListener('pointercancel', endStroke);
 
   // --- actions ---
-  const done = () => { wrap.remove(); syncDoodleSurface(); onClose && onClose(); };
+  const done = () => { stopScribble(); wrap.remove(); syncDoodleSurface(); onClose && onClose(); };
   const save = () => { sendWs('action', { action: { type: 'DOODLE_GOOSE', cardId, strokes } }); done(); };
   wrap.__forceClose = save;   // turn actions save-and-close rather than discard
   const row = document.createElement('div');
@@ -1130,6 +1134,7 @@ const pondXY = (e, r) => [
 function setPondMode(on) {
   pondMode = on;
   pondCur = null;
+  stopScribble();
   if (!on) pondResume = false;
   document.body.classList.toggle('pond-mode', on);
   $('pondCapture').classList.toggle('hidden', !on);
@@ -1251,6 +1256,7 @@ function eraseAt(e) {
       const brush = brushFor(pondColor, pondWeight, cv.width);
       cv.getContext('2d').drawImage(brush, x / 1000 * cv.width - brush.width / 2, y / 1000 * cv.height - brush.width / 2);
     }
+    startScribble();   // paper-scratch loop, silent until the crayon moves
   });
   cap.addEventListener('pointermove', (e) => {
     if (!pondCur) return;
@@ -1263,9 +1269,11 @@ function eraseAt(e) {
     pondCur.s.p.push(x, y);
     const cv = pondCanvasFor(pondCur.el);
     if (cv) stampSegment(cv.getContext('2d'), pondCur.s, pondCur.s.p.length - 2, cv.width, cv.height, 0, 0, Math.random);
+    scribbleMove();
     streamLive();
   });
   const end = () => {
+    stopScribble();
     if (!pondCur) return;
     const wasErasing = pondCur.erasing;
     const { zone, s } = pondCur;
