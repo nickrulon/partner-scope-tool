@@ -1,7 +1,9 @@
-# 🪿 Quit Goosin Around! — the computer game
+# Quit Goosin Around! — the computer game
 
 A real-time, multiplayer digital version of the card game. Self-contained and
 independent of the partner-scope-tool that shares this repo.
+
+**Play it live: <https://quitgoosinaround.com>**
 
 ## Run it
 

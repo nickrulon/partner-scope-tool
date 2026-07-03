@@ -51,9 +51,20 @@ Open that URL on your laptop and your phone — Create a Pond on one, share the
 4-letter code, Join on the other. It's a public link, so friends anywhere can
 play.
 
+### Custom domain (live)
+The game runs at **https://quitgoosinaround.com** (and www). Nick owns the
+domain at Squarespace Domains; DNS: `A @ → 216.24.57.1` and
+`CNAME www → quit-goosin-around.onrender.com`, added under the domain's
+DNS Settings → Custom records. Render (service → Settings → Custom Domains)
+verified both and auto-issues/renews the TLS certificates. The onrender.com
+URL keeps working alongside.
+
 ### Notes
 - **Free tier sleeps** after ~15 min idle; the first visit after that takes
-  ~30–60s to wake up. Fine for casual games. Upgrade the plan to keep it warm.
+  ~30–60s to wake up. Fine for casual games. Upgrade the plan to keep it warm —
+  or point a free uptime pinger (cron-job.org / UptimeRobot) at
+  `https://quitgoosinaround.com/healthz` every 10 minutes to keep it awake
+  within the free tier's monthly hours.
 - **One instance** keeps all rooms in memory — perfect for friends. Don't scale
   to multiple instances or rooms would split across them.
 - HTTPS is automatic, so the client uses secure `wss://` WebSockets with no
