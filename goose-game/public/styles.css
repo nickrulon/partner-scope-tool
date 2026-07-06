@@ -579,6 +579,13 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .pass-body { font-size: .95rem; color: var(--ink); }
 .pass-list { margin: 0; padding-left: 20px; font-size: .9rem; color: var(--ink); line-height: 1.5; }
 .pass-note { font-size: .78rem; color: var(--ink-soft); text-align: center; }
+/* ⚠️ friends & family callout — REMOVE AT PUBLIC LAUNCH (FREE_FRIEND_CODE) ⚠️ */
+.friend-callout { background: var(--bill); color: #2a1500; border: 3px dashed #2a1500; border-radius: 12px; padding: 12px 14px; text-align: center; margin: 4px 0 2px; }
+.fc-badge { font-family: var(--type); font-size: .62rem; font-weight: bold; letter-spacing: .16em; opacity: .8; }
+.fc-lead { font-family: var(--display); font-size: 1.3rem; line-height: 1.05; margin: 3px 0 6px; }
+.fc-how { font-size: .82rem; }
+.fc-code { font-family: var(--display); font-size: 1.9rem; letter-spacing: .12em; background: #2a1500; color: var(--bill); border-radius: 8px; padding: 4px 10px; margin-top: 6px; user-select: all; }
+.friend-btn { background: var(--good); border-color: #3f5f28; color: #f1f7e9; }
 .pass-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .pass-actions .btn-ghost { color: var(--ink); border-color: var(--ink); }
 .pass-redeem { display: flex; gap: 8px; }

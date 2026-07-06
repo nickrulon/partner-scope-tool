@@ -28,6 +28,12 @@ const PLATFORM = (window.Capacitor && window.Capacitor.getPlatform && window.Cap
   ? 'ios' : (window.GOOSE_PLATFORM || 'web');
 let myEntitlements = [];
 
+// ⚠️ FRIENDS-&-FAMILY SOFT-LAUNCH — REMOVE AT PUBLIC LAUNCH ⚠️
+// Set to '' (empty) to hide the free-code callout on the Host Pass sheet.
+// While set, the sheet loudly tells friends to type this code for free
+// hosting. Must match the server's GOOSE_FRIEND_CODE env var.
+const FREE_FRIEND_CODE = 'GOOSEGANG';
+
 const SID_KEY = 'goose_sid';
 let spectatorId = localStorage.getItem(SID_KEY) || `s_${Math.random().toString(36).slice(2, 9)}`;
 localStorage.setItem(SID_KEY, spectatorId);
@@ -290,8 +296,16 @@ function showHostPassSheet(buyUrl) {
   const box = document.createElement('div');
   box.className = 'paper pass-box';
   box.innerHTML =
-    `<div class="pass-title">Host yer own pond</div>
-     <div class="pass-body">The <strong>Host Pass</strong> is a one-time purchase that unlocks:</div>
+    `<div class="pass-title">Host yer own pond</div>` +
+    // ⚠️ FRIENDS-&-FAMILY CALLOUT — REMOVE AT PUBLIC LAUNCH (see FREE_FRIEND_CODE) ⚠️
+    (FREE_FRIEND_CODE ? `
+     <div class="friend-callout">
+       <div class="fc-badge">FRIENDS &amp; FAMILY</div>
+       <div class="fc-lead">Yer one of Nick's people — so it's <strong>FREE!</strong></div>
+       <div class="fc-how">Type this code below and hit Redeem:</div>
+       <div class="fc-code">${esc(FREE_FRIEND_CODE)}</div>
+     </div>` : '') +
+    `<div class="pass-body">The <strong>Host Pass</strong> unlocks:</div>
      <ul class="pass-list">
        <li>Create multiplayer ponds &amp; invite friends with a code or link</li>
        <li>Pick the house rules for your games</li>
@@ -300,6 +314,12 @@ function showHostPassSheet(buyUrl) {
      <div class="pass-note">Joinin' someone else's pond and playin' the computer stay free, always.</div>`;
   const row = document.createElement('div');
   row.className = 'pass-actions';
+  // ⚠️ FRIENDS-&-FAMILY one-tap unlock — REMOVE AT PUBLIC LAUNCH ⚠️
+  if (FREE_FRIEND_CODE) {
+    row.appendChild(btn(`Unlock free with ${FREE_FRIEND_CODE}`, 'btn-primary friend-btn', () => {
+      sendWs('redeem', { key: FREE_FRIEND_CODE });
+    }));
+  }
   const buy = btn('Get the Host Pass — $2.99', 'btn-primary', async () => {
     if (window.GoosePurchase && window.GoosePurchase.buyHostPass) {
       try { await window.GoosePurchase.buyHostPass(); } catch { /* user cancelled */ }
@@ -319,7 +339,7 @@ function showHostPassSheet(buyUrl) {
   redeemRow.className = 'pass-redeem';
   const input = document.createElement('input');
   input.className = 'pass-key';
-  input.placeholder = 'License key or friend code';
+  input.placeholder = FREE_FRIEND_CODE ? `Type ${FREE_FRIEND_CODE} (or a license key)` : 'License key or friend code';
   input.maxLength = 64;
   const redeem = btn('Redeem', '', () => {
     const k = input.value.trim();
