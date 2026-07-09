@@ -591,6 +591,27 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .pass-redeem { display: flex; gap: 8px; }
 .pass-redeem .pass-key { flex: 1; min-width: 0; font-size: .85rem; }
 
+/* ---------- how-to-goose (rules) ---------- */
+.how-btn { background: transparent; color: var(--ink); border-color: var(--paper-edge); margin-top: 8px; }
+.how-btn:hover { border-color: var(--bill); }
+/* waiting-room corner button — mirrors the back button, top-right */
+.how-btn-corner { position: absolute; top: 16px; right: 16px; z-index: 5; background: var(--cream); color: var(--ink); border-color: var(--paper-edge); font-size: .85rem; padding: 8px 14px; }
+.how-btn-corner:hover { border-color: var(--bill); }
+/* game topbar keeps Rules + Sound together */
+.topbar-btns { display: flex; gap: 8px; align-items: center; }
+
+.rules-modal { z-index: 155; }
+.rules-box { width: min(94vw, 560px); max-height: 90vh; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.rules-body { overflow-y: auto; min-height: 0; padding-right: 6px; color: var(--ink); font-size: .95rem; line-height: 1.5; }
+.rules-body .rules-title { font-family: var(--display); font-size: 1.9rem; color: var(--bill-dark); text-align: center; line-height: 1; }
+.rules-body .rules-tag { text-align: center; color: var(--ink-soft); font-size: .85rem; margin: 4px 0 10px; }
+.rules-body h3 { font-family: var(--display); font-size: 1.25rem; color: var(--bill-dark); margin: 18px 0 4px; }
+.rules-body p { margin: 6px 0; }
+.rules-body ul { margin: 6px 0; padding-left: 20px; }
+.rules-body li { margin: 3px 0; }
+.rules-body .rules-outro { font-family: var(--display); font-size: 1.15rem; color: var(--bill-dark); text-align: center; margin-top: 18px; }
+.rules-close { align-self: center; }
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);

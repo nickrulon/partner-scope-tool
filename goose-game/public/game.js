@@ -284,6 +284,100 @@ $('muteToggle').onchange = (e) => { setMuted(e.target.checked); syncSoundUI(); }
 $('volSlider').oninput = (e) => { setVolume(e.target.value / 100); };
 $('volSlider').onchange = () => playSound('click');
 
+// ---- How to Goose (rules) ----
+// Shown from the lobby, waiting room, and game board. Static rules content
+// in Nick's voice; scrollable paper modal.
+const RULES_HTML = `
+  <div class="rules-title">Quit Goosin' Around!</div>
+  <div class="rules-tag">a stupid card game about geese bein versus a bad little kid, basically</div>
+
+  <h3>What yer tryin' to do</h3>
+  <p>The goose may swim on the pond, but Big Boy's daddy owns the pond, and Big Boy does NOT tolerate any geese goosin' around in his daddy's pond. Legend says he's got the strength of 20 geese.</p>
+  <p>Yer mission is a good ol' fashioned coop d'état: build a gaggle worth <strong>21 goose points</strong>—one more than Big Boy's reputed strength—and seize the pond as the one true Great Honkeror, Ruler of the Pond.</p>
+
+  <h3>The two decks</h3>
+  <p>Everything's shuffled and dealt for ya. Two piles:</p>
+  <ul>
+    <li><strong>The Goose Deck</strong> (68 cards) — yer regular geese and the dreaded Big Boy. When it runs dry, the discards reshuffle into a fresh pile automatically.</li>
+    <li><strong>The Wild Goose Market</strong> (22 cards) — one-time-use trick geese. When they're gone, they're gone for good. No reshuffle.</li>
+  </ul>
+
+  <h3>Startin' a pond</h3>
+  <p>First, the whole gaggle's gotta <strong>unanimously</strong> agree on who's the silliest goose amongst ya. Split votes don't count — everybody's gotta land on the same goose. Make yer case, make it good. The game'll wait. That silliest goose goes first, then play runs around the pond.</p>
+  <p>Play with friends in the same room or in different necks of the woods. Don't matter!</p>
+  <p>No friends handy? <strong>Play the Computer</strong> — a solo pond against the geese-bots, free forever.</p>
+
+  <h3>How to goose around</h3>
+  <p>A turn begins and ends when ya draw a Goose Card. Simple. Period. Point-blank and goodnight.</p>
+  <p>Before ya draw, if ya want, ya can trade in the Wild Goose Market: hand over regular geese worth exactly 4 points (four Goose, or two Geese, or a Geeses, etc.) for one Wild Goose Card. Investin' ain't by no means required, but… well, you play how ye want to.</p>
+  <p>Then ya draw, and yer turn's over. What ya drew is yer business. Nobody else sees it.</p>
+  <p>If ya draw Big Boy: the whole table hollers "QUIT GOOSIN' AROUND, YA GOOSE!" and yer regular geese scatter. Ya lose yer whole regular hand. Unless ya stop him (see below). Yer Wild geese are safe; Big Boy don't scare them none.</p>
+
+  <h3>Stoppin' Big Boy</h3>
+  <p>When Big Boy comes for ya, whether ya drew him yerself or somebody sent him, ye can fight back if ya got the right gaggle:</p>
+  <ul>
+    <li><strong>Goose Gang</strong> — Big Boy knows better than to mess with the Goose Gang. Blocks Big Boy cold. HONK, HONK, SON!</li>
+    <li><strong>Get Goosed</strong> — Use this card to divert Big Boy's attention to another player, forcing them to discard their Goose Cards. That player can defend themselves by playing another Get Goosed card (if they got one) or block it by playin a Goose Gang card.</li>
+  </ul>
+  <p>And on any turn, if ya got one:</p>
+  <ul>
+    <li><strong>Lawn Mower</strong> — This goose got ear plugs and makes the most God-awful noise y'ever heard. Play it to force any player to discard their whole regular hand. Can't be blocked. Can't be Goosed away. Just gone.</li>
+  </ul>
+
+  <h3>"I'm bouta goose!"</h3>
+  <p>The moment yer gaggle crosses <strong>17 points</strong>, ya gotta call it: "I'm bouta goose!" The game'll prompt ya right after the draw that puts ya there. Once ya announce, it's public. Everybody knows yer closin' in, and they just might Lawn Mower ya down. Keep it quiet at yer on risk, fer ya can't announce and win on the same turn.</p>
+  <p>Skip the announcement and hit 21 anyway? Ya get GOOSED. Failure to announce "I'm bouta goose!" before reachin 21 results in losing yer entire regular Goose Card hand. Learn to count.</p>
+
+  <h3>Winnin'</h3>
+  <p>First goose to <strong>21 points</strong> (regular geese plus Wild geese) wins and is crowned The Great Honkeror, Ruler of the Pond. All other players must flap their goose wings and honk in humiliation. Failure to honk makes you unfun to play games with.</p>
+  <p>The Honkeror carries The Great Honkeror card into the next game in that pond—that's 2 points at the jump, suckers—till somebody dethrones 'em.</p>
+
+  <h3>The cards</h3>
+  <p><strong>Goose Deck</strong></p>
+  <ul>
+    <li>Goose — 1 point (30)</li>
+    <li>Geese — 2 points (18)</li>
+    <li>Geeses — 4 points (10)</li>
+    <li>Big Boy — scares off yer whole regular hand (10)</li>
+  </ul>
+  <p><strong>Wild Goose Market</strong> (each worth 1 point unless noted)</p>
+  <ul>
+    <li>Ungoosable Goose — don't do much but stand thyur, but he's a steady point Big Boy can't touch (12)</li>
+    <li>Goose Gang — block a Big Boy or a Get Goosed (3)</li>
+    <li>Get Goosed — redirect Big Boy at another gaggle (5)</li>
+    <li>Lawn Mower (rare) — unblockable regular goose hand-wipe on any turn (2)</li>
+    <li>The Great Honkeror — 2 points, held by the reigning champ, set aside otherwise (1)</li>
+  </ul>
+
+  <h3>Name 'em and draw on 'em</h3>
+  <p>Every goose ya hold is yers to make yer own. Name yer geese. A Goose gets 1 name, a Geese gets 2, a Geeses gets 4. Name yer wild geese, too. And doodle right on the card with the crayon. Give a goose a mustache, a hat, whatever tickles yer faincy.</p>
+  <p>What's better, yer names and doodles ride the card. When ya lose a goose to Big Boy or invest it in the Wild Goose Market, it shuffles back into the deck, and whoever draws it next gets yer silly-named, funny-lookin goose. And long as ya keep playin' in the same pond, they carry from one game to the next. So mark up yer flock. Yer leavin' little gags for the whole gaggle.</p>
+
+  <div class="rules-outro">Now quit goosin' around and go get'chur geese.</div>
+`;
+
+function showInstructions() {
+  playSound('click');
+  document.querySelectorAll('.rules-modal').forEach((m) => m.remove());
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay rules-modal';
+  const box = document.createElement('div');
+  box.className = 'paper rules-box';
+  const body = document.createElement('div');
+  body.className = 'rules-body';
+  body.innerHTML = RULES_HTML;
+  box.appendChild(body);
+  const close = btn('Got it — let\'s goose', 'btn-primary rules-close', () => wrap.remove());
+  box.appendChild(close);
+  wrap.appendChild(box);
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
+  document.body.appendChild(wrap);
+  body.scrollTop = 0;
+}
+$('howBtnLobby').onclick = showInstructions;
+$('howBtnWaiting').onclick = showInstructions;
+$('howBtnGame').onclick = showInstructions;
+
 // ---- Host Pass upgrade sheet ----
 // Shown when an iOS client without the Host Pass tries to create a
 // multiplayer room. The actual StoreKit purchase is wired via the

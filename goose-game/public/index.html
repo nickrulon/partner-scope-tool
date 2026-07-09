@@ -35,6 +35,7 @@
           <button id="joinBtn" class="btn">Join</button>
         </div>
         <button id="watchBtn" class="btn block watch-btn">Watch a Game (spectate)</button>
+        <button id="howBtnLobby" class="btn block how-btn">How to Goose (Rules)</button>
         <p id="lobbyErr" class="err"></p>
       </div>
     </div>
@@ -43,6 +44,7 @@
   <!-- WAITING ROOM -->
   <section id="waiting" class="screen lobby hidden">
     <button id="backBtn" class="btn back-btn" title="Leave and go back">← Back</button>
+    <button id="howBtnWaiting" class="btn how-btn-corner" title="How to play">How to Goose</button>
     <div class="lobby-inner">
       <h1 class="logo small">The Pond</h1>
       <p class="tag">Share the code and vote for the silliest goose.</p>
@@ -99,7 +101,10 @@
     <header class="topbar paper">
       <div class="brand">Quit Goosin' <span>Around!</span></div>
       <div class="room-strip">Game Room: <strong id="gRoomName">the pond</strong> · <span id="gPlayerCount">2 geese</span> <span id="specBadge" class="spec-badge hidden">WATCHING</span></div>
-      <button id="soundToggle" class="btn btn-icon" title="Toggle sound">SOUND: ON</button>
+      <div class="topbar-btns">
+        <button id="howBtnGame" class="btn btn-icon" title="How to play">RULES</button>
+        <button id="soundToggle" class="btn btn-icon" title="Toggle sound">SOUND: ON</button>
+      </div>
     </header>
 
     <div class="table">
