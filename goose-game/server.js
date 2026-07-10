@@ -171,7 +171,7 @@ function roomView(room, viewerId, asSpectator = false) {
 // game state) so the graffiti survives rematches; the host can wipe it.
 // 'waitcard' = the big paper card in the waiting room — doodling starts
 // before the game does.
-const POND_ZONES = new Set(['play', 'topbar', 'decks', 'myhand', 'waitcard']);
+const POND_ZONES = new Set(['play', 'topbar', 'decks', 'myhand', 'waitcard', 'waitbg']);
 const POND_MAX_STROKES = 250;      // oldest graffiti fades away
 const POND_MAX_POINTS = 1200;      // per stroke
 
@@ -181,7 +181,7 @@ function pondSanitize(room, stroke) {
   const zoneOk = POND_ZONES.has(zone)
     || (zone.startsWith('player:') && !!room.game && room.game.players.some((p) => `player:${p.id}` === zone));
   if (!zoneOk || !Array.isArray(s.p)) return null;
-  const c = Math.min(7, Math.max(0, s.c | 0));   // 8-color palette (incl. white)
+  const c = Math.min(9, Math.max(0, s.c | 0));   // 10-color palette (incl. pink, purple, white)
   const w = Math.min(2, Math.max(0, s.w | 0));
   const p = [];
   for (let i = 0; i + 1 < s.p.length && p.length / 2 < POND_MAX_POINTS; i += 2) {
@@ -190,7 +190,8 @@ function pondSanitize(room, stroke) {
     p.push(Math.min(1000, Math.max(0, x)), Math.min(1000, Math.max(0, y)));
   }
   if (p.length < 4) return null;
-  return { z: zone, c, w, p };
+  // e:1 marks an eraser stroke — rendered as a clean wipe instead of pigment.
+  return s.e ? { z: zone, c, w, p, e: 1 } : { z: zone, c, w, p };
 }
 
 // Relay a lightweight live-drawing event to everyone EXCEPT the artist —
@@ -898,7 +899,9 @@ function doRematch(ws, payload) {
 function doAction(ws, { action }) {
   const room = getRoom(ws.meta.roomCode);
   if (!room || !room.game) return;
-  const { state, error } = applyAction(room.game, ws.meta.playerId, action);
+  // accountId rides along so doodle strokes get author-stamped server-side
+  // (protection: nobody can erase another goose's card art).
+  const { state, error } = applyAction(room.game, ws.meta.playerId, action, { accountId: ws.meta.accountId || null });
   room.game = state;
   if (error) return send(ws, 'error', { message: error });
   if (state.winnerId) { room.lastWinnerId = state.winnerId; room.carryNames = collectNames(state); }

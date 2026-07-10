@@ -44,13 +44,13 @@
   <!-- WAITING ROOM -->
   <section id="waiting" class="screen lobby hidden">
     <button id="backBtn" class="btn back-btn" title="Leave and go back">← Back</button>
-    <button id="howBtnWaiting" class="btn how-btn-corner" title="How to play">How to Goose</button>
     <div class="lobby-inner">
       <h1 class="logo small">The Pond</h1>
       <p class="tag">Share the code and vote for the silliest goose.</p>
+      <button id="howBtnWaiting" class="btn how-btn block waiting-how">How to Goose (Rules)</button>
       <div class="paper lobby-card">
         <div class="codepill" id="codePill">Room <strong id="roomCode"></strong></div>
-        <button id="copyLinkBtn" class="btn block copy-link-btn">Copy Invite Link</button>
+        <button id="copyLinkBtn" class="btn block copy-link-btn"><span class="btn-label">Copy Invite Link</span></button>
         <div id="decidedMsg" class="decided hidden"></div>
 
         <!-- startin' rules callout -->
@@ -69,10 +69,10 @@
         <div id="lobbyWatchers" class="watchers lobby-watchers hidden"></div>
 
         <div id="hostControls" class="host-controls hidden">
-          <button id="addBotBtn" class="btn block">+ Add a Computer Goose</button>
+          <button id="addBotBtn" class="btn block"><span class="btn-label">+ Add a Computer Goose</span></button>
           <label id="keepNamesRow" class="check hidden"><input type="checkbox" id="keepNames" checked />
             <span>Keep the named &amp; doodled geese from last game (uncheck for a fresh deck)</span></label>
-          <button id="startBtn" class="btn btn-primary block" disabled>Start Goosin'</button>
+          <button id="startBtn" class="btn btn-primary block" disabled><span class="btn-label">Start Goosin'</span></button>
           <p id="startHint" class="start-hint"></p>
         </div>
         <p id="waitHint" class="tag"></p>
@@ -82,14 +82,14 @@
           <div class="lh-head">
             <span class="lh-title">Lobby Honkin'</span>
             <div class="nudge-row">
-              <button id="voteBtn" class="btn nudge-btn">"Vote!"</button>
-              <button id="hollerBtn" class="btn nudge-btn">Holler</button>
+              <button id="voteBtn" class="btn nudge-btn"><span class="btn-label">"Vote!"</span></button>
+              <button id="hollerBtn" class="btn nudge-btn"><span class="btn-label">Holler</span></button>
             </div>
           </div>
           <div id="lobbyChat" class="lh-msgs"></div>
           <div class="row lh-row">
             <input id="lobbyChatInput" maxlength="200" placeholder="talk some smack, holler in the chat…" />
-            <button id="lobbyChatSend" class="btn btn-primary">Honk</button>
+            <button id="lobbyChatSend" class="btn btn-primary"><span class="btn-label">Honk</span></button>
           </div>
         </div>
       </div>
@@ -188,7 +188,11 @@
   <div id="pondBar" class="paper pond-bar hidden"></div>
 
   <!-- audience view: mobile-only toggle for the log/chat bottom sheet -->
-  <button id="specPanelToggle" class="spec-panel-toggle hidden"><span id="chatBadge" class="chat-badge hidden">0</span>Log &amp; Chat</button>
+  <button id="specPanelToggle" class="spec-panel-toggle hidden"><span id="chatBadge" class="chat-badge hidden">0</span>Menu</button>
+
+  <!-- your-turn banner: pinned to the very top whenever it's your turn while
+       you're naming or doodling (keyboard-proof, modal-proof) -->
+  <div id="turnTop" class="turn-top">IT'S YER TURN!</div>
 
   <div id="nudgeBanner" class="nudge-banner hidden"></div>
   <div id="toast" class="toast hidden"></div>

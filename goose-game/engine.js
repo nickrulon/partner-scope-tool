@@ -23,11 +23,14 @@ const nameSlots = (kind) => {
 // --- Doodles ---------------------------------------------------------------
 // A doodle is a list of crayon strokes stored ON the card object — like names,
 // it survives discard → reshuffle and travels to whoever draws the card next.
-// Format: [{ c: 0..6 (palette index), w: 0..2 (weight), p: [x,y,x,y,...] }]
+// Format: [{ c: 0..9 (palette index), w: 0..2 (weight), p: [x,y,x,y,...],
+//            e?: 1 (eraser stroke — a clean wipe instead of pigment),
+//            by?: accountId (author — stamped server-side, never trusted) }]
 // with coords as ints 0..1000 normalized to the card face. Vector (not
 // raster) so it renders crisp at every card size and stays small on the wire.
 const DOODLE_MAX_STROKES = 64;
 const DOODLE_MAX_POINTS = 1500;   // total across all strokes (~12KB JSON worst case)
+const DOODLE_MAX_TOTAL = 128;     // hard cap on strokes per card across all authors
 
 function cleanDoodle(input) {
   if (!Array.isArray(input)) return null;
@@ -35,7 +38,7 @@ function cleanDoodle(input) {
   let pts = 0;
   for (const s of input.slice(0, DOODLE_MAX_STROKES)) {
     if (!s || !Array.isArray(s.p)) continue;
-    const c = Math.min(7, Math.max(0, s.c | 0));   // 8-color palette (incl. white)
+    const c = Math.min(9, Math.max(0, s.c | 0));   // 10-color palette (incl. pink, purple, white)
     const w = Math.min(2, Math.max(0, s.w | 0));
     const p = [];
     for (let i = 0; i + 1 < s.p.length && pts < DOODLE_MAX_POINTS; i += 2) {
@@ -44,7 +47,14 @@ function cleanDoodle(input) {
       p.push(Math.min(1000, Math.max(0, x)), Math.min(1000, Math.max(0, y)));
       pts++;
     }
-    if (p.length >= 4) out.push({ c, w, p });
+    if (p.length >= 4) {
+      const clean = s.e ? { c, w, p, e: 1 } : { c, w, p };
+      // Preserve authorship (carry between games). Safe: the DOODLE_GOOSE
+      // action re-stamps the submitter's layer regardless, so a forged `by`
+      // never survives; only server-side carried data flows through here.
+      if (typeof s.by === 'string' && s.by) clean.by = s.by.slice(0, 40);
+      out.push(clean);
+    }
   }
   return out.length ? out : null;
 }
@@ -99,6 +109,10 @@ export function collectNames(state) {
   for (const p of state.players) { scan(p.regular); scan(p.wild); }
   scan(state.gooseDraw);
   scan(state.gooseDiscard);
+  // Wild piles too — a played Goose Gang / Get Goosed (wildDiscard) or a
+  // retired Great Honkeror keeps its names and doodles for the next game.
+  scan(state.wildDraw);
+  scan(state.wildDiscard);
   if (state.bigBoyCard) scan([state.bigBoyCard]);
   return out;
 }
@@ -161,10 +175,21 @@ export function createGame(players, options = {}) {
   // cards of the same kind so the named geese live on into this game's deck.
   applyCarriedNames([state.gooseDraw, state.wildDraw], options.carryNames);
 
-  // Defending champion starts holding The Great Honkeror (+2).
+  // Defending champion starts holding The Great Honkeror (+2). The Honkeror
+  // is never IN a deck (set aside), so applyCarriedNames can't reach it —
+  // stamp its carried name/doodle directly onto the champion's copy here.
   if (state.honkerorHolderId) {
     const champ = state.players.find((p) => p.id === state.honkerorHolderId);
-    if (champ) champ.wild.push({ id: newId(), kind: 'GREAT_HONKEROR' });
+    if (champ) {
+      const hk = { id: newId(), kind: 'GREAT_HONKEROR' };
+      const entry = (options.carryNames || []).find((e) => e && e.kind === 'GREAT_HONKEROR');
+      if (entry) {
+        if (Array.isArray(entry.names) && entry.names.length) hk.names = entry.names.slice(0, nameSlots('GREAT_HONKEROR'));
+        const doodle = cleanDoodle(entry.doodle);
+        if (doodle) hk.doodle = doodle;
+      }
+      champ.wild.push(hk);
+    }
   }
 
   // "Silliest goose goes first": random seat unless caller fixes it.
@@ -331,7 +356,7 @@ export function removePlayer(state, playerId, opts = {}) {
 
 function err(state, msg) { return { state, error: msg }; }
 
-export function applyAction(state, playerId, action) {
+export function applyAction(state, playerId, action, meta = {}) {
   if (state.phase === 'GAME_OVER') return err(state, 'The game is over.');
   const type = action?.type;
 
@@ -340,7 +365,7 @@ export function applyAction(state, playerId, action) {
   // object, so they survive discard → reshuffle and travel to whoever next
   // draws the card.
   if (type === 'NAME_GOOSE') return nameGoose(state, playerId, action);
-  if (type === 'DOODLE_GOOSE') return doodleGoose(state, playerId, action);
+  if (type === 'DOODLE_GOOSE') return doodleGoose(state, playerId, action, meta);
 
   // Response phase: only the pending target may act.
   if (state.phase === 'AWAIT_BIG_BOY' || state.phase === 'AWAIT_GET_GOOSED') {
@@ -388,15 +413,22 @@ function nameGoose(state, playerId, action) {
 
 // Crayon doodles: any card in your own gaggle (regular or wild). Sending an
 // empty/invalid stroke set wipes the doodle (that's the editor's "Clear").
-function doodleGoose(state, playerId, action) {
+// Protective merge: the client only ever submits ITS OWN layer. Strokes by
+// other authors are preserved verbatim (nobody can wipe another goose's art —
+// only draw over it); the submitter's strokes are (re)stamped with their
+// account id. Legacy unstamped strokes count as the current holder's.
+function doodleGoose(state, playerId, action, meta = {}) {
   const p = findPlayer(state, playerId);
   if (!p) return err(state, 'Unknown goose.');
   const card = p.regular.find((c) => c.id === action.cardId)
     || p.wild.find((c) => c.id === action.cardId);
   if (!card) return err(state, 'You can only doodle on geese in your own gaggle.');
-  const doodle = cleanDoodle(action.strokes);
-  if (doodle) {
-    card.doodle = doodle;
+  const me = meta.accountId || null;
+  const keep = (card.doodle || []).filter((s) => s.by && (!me || s.by !== me));
+  const mine = (cleanDoodle(action.strokes) || []).map((s) => (me ? { ...s, by: me } : s));
+  const merged = [...keep, ...mine].slice(0, DOODLE_MAX_TOTAL);
+  if (merged.length) {
+    card.doodle = merged;
     logMsg(state, `You doodled on your ${CARD_META[card.kind].name}. It's art.`, 'good', p.id);
   } else {
     delete card.doodle;
@@ -584,6 +616,15 @@ export function redact(state, viewerId) {
       ? { type: state.pending.type, targetId: state.pending.target }
       : null,
     winnerId: state.winnerId,
+    // At game over the WHOLE deck goes public — every pile and every hand,
+    // Great Honkeror included — so the table can flip through the doodled,
+    // named geese in the deck gallery and save keepsakes.
+    deck: state.phase === 'GAME_OVER' ? [
+      ...state.players.flatMap((p) => [...p.regular, ...p.wild]),
+      ...state.gooseDraw, ...state.gooseDiscard,
+      ...state.wildDraw, ...state.wildDiscard,
+      ...(state.bigBoyCard ? [state.bigBoyCard] : []),
+    ].map((c) => ({ kind: c.kind, names: c.names || [], doodle: c.doodle || null })) : undefined,
     gooseDrawCount: state.gooseDraw.length,
     gooseDiscardCount: state.gooseDiscard.length,
     wildDrawCount: state.wildDraw.length,

@@ -462,12 +462,47 @@ body.pond-erasing .pond-capture { cursor: cell; }
 .stage-actions { position: relative; }
 .pond-bar { padding-left: 28px; }
 
-/* waiting-room doodling: same lift-above-the-crayon + halo treatment */
+/* ---------- waiting-room doodling: the WHOLE room is a canvas ----------
+   Two zones: the green background (waitbg, canvas z0 behind the content) and
+   the paper card (waitcard, canvas z1 over box/button BACKGROUNDS). Text and
+   inputs float above the crayon at z2 with a halo buffer, so ya can scribble
+   on everything and still read and press everything. */
+#waiting { position: relative; }
+#waiting > .pond-layer { z-index: 0; }
+#waiting .lobby-inner { position: relative; z-index: 1; }
 #waiting .lobby-card { position: relative; }
-#waiting .lobby-card > *:not(.pond-layer) { position: relative; z-index: 2; }
-#waiting .codepill, #waiting .vote-status, #waiting .start-hint, #waitHint {
+
+/* text, inputs, and interactive bits ride above the crayon */
+#waiting .codepill, #waiting .vote-status, #waiting .start-hint, #waitHint,
+#waiting .decided, #waiting .vr-badge, #waiting .vr-list, #waiting .vr-foot,
+#waiting .vc-top, #waiting .vc-voters, #waiting .vc-remove,
+#waiting .lh-title, #waiting .check, #waiting .lh-msgs, #waiting .lh-row,
+#waiting .lobby-watchers, #waiting .btn .btn-label {
+  position: relative; z-index: 2;
+}
+/* the readability buffer: cream halo behind card text */
+#waiting .codepill, #waiting .vote-status, #waiting .start-hint, #waitHint,
+#waiting .decided, #waiting .vr-badge, #waiting .vr-list, #waiting .vr-foot,
+#waiting .vc-top, #waiting .lh-title, #waiting .check {
   text-shadow: 0 0 3px var(--cream), 0 0 6px var(--cream), 0 0 10px var(--cream);
 }
+/* button labels: halo matched to the button's own background */
+#waiting .btn .btn-label { text-shadow: 0 0 3px var(--cream), 0 0 6px rgba(241,231,207,.85); }
+#waiting .btn:not(.btn-primary):not(.copy-link-btn):not(.nudge-btn) .btn-label {
+  text-shadow: 0 0 3px var(--ink), 0 0 6px rgba(42,33,24,.85);
+}
+
+/* your-turn top banner: visible ONLY when it's your turn AND a busy surface
+   (name modal, doodle editor, pond marker) is open — pinned above keyboards
+   and modals so nobody ever stalls the pond mid-mustache */
+.turn-top {
+  display: none; position: fixed; top: 8px; left: 50%; transform: translateX(-50%);
+  z-index: 175; background: var(--bill); color: #2a1500; border: 2px solid var(--bill-dark);
+  border-radius: 10px; padding: 8px 18px; font-family: var(--display); font-size: 1.1rem;
+  letter-spacing: .04em; box-shadow: 0 6px 18px rgba(0,0,0,.55); pointer-events: none;
+  animation: honkPulse 1.2s infinite;
+}
+body.my-turn.doodling-surface .turn-top { display: block; }
 
 /* Your turn never waits on the crayon: while ANY doodle surface is open
    (pond marker mode OR the card editor), the action buttons float above it,
@@ -560,6 +595,11 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .overlay-controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 560px; animation: fadeIn .3s .5s both; }
 .overlay-controls .btn { font-size: 1rem; }
 .overlay-msg { color: var(--cream); font-family: var(--type); font-size: 1.1rem; }
+/* Big Boy intel strip: everyone's card counts, visible during the threat */
+.threat-counts { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; width: 100%; margin-bottom: 4px; }
+.tc-chip { font-size: .74rem; color: var(--cream-2); background: rgba(0,0,0,.45); border: 1px solid rgba(241,231,207,.25); border-radius: 12px; padding: 3px 10px; }
+.tc-chip strong { color: var(--bill); }
+.tc-chip.me { border-color: var(--bill); }
 
 /* ---------- menu sound toggle (lobby + waiting room) ---------- */
 .menu-sound {
@@ -594,9 +634,9 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 /* ---------- how-to-goose (rules) ---------- */
 .how-btn { background: transparent; color: var(--ink); border-color: var(--paper-edge); margin-top: 8px; }
 .how-btn:hover { border-color: var(--bill); }
-/* waiting-room corner button — mirrors the back button, top-right */
-.how-btn-corner { position: absolute; top: 16px; right: 16px; z-index: 5; background: var(--cream); color: var(--ink); border-color: var(--paper-edge); font-size: .85rem; padding: 8px 14px; }
-.how-btn-corner:hover { border-color: var(--bill); }
+/* waiting-room rules button — in the flow under the header, clear of the
+   fixed sound pill that used to cover the old corner placement on mobile */
+.waiting-how { margin: 0 0 14px; }
 /* game topbar keeps Rules + Sound together */
 .topbar-btns { display: flex; gap: 8px; align-items: center; }
 
@@ -611,6 +651,27 @@ body.my-turn.doodling-surface .stage-actions:not(:empty)::before {
 .rules-body li { margin: 3px 0; }
 .rules-body .rules-outro { font-family: var(--display); font-size: 1.15rem; color: var(--bill-dark); text-align: center; margin-top: 18px; }
 .rules-close { align-self: center; }
+
+/* ---------- deck gallery (end of game) ---------- */
+.deck-gallery { z-index: 152; align-items: stretch; justify-content: flex-start; overflow-y: auto; padding: 12px; background: rgba(10, 22, 17, .98); }
+.gal-box { width: min(96vw, 640px); margin: 0 auto; display: flex; flex-direction: column; gap: 12px; min-height: 100%; padding-bottom: 16px; }
+.gal-head { text-align: center; margin-top: 6px; }
+.gal-title { font-family: var(--display); font-size: 2rem; color: var(--cream); text-shadow: 3px 3px 0 var(--ink); }
+.gal-sub { color: var(--cream-2); font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; margin-top: 4px; }
+.gal-tabs { display: flex; gap: 8px; justify-content: center; }
+.gal-tab { background: transparent; color: var(--cream); border-color: var(--cream); }
+.gal-tab.sel { background: var(--bill); border-color: var(--bill-dark); color: #2a1500; font-weight: bold; }
+.gal-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.gal-grid .gal-cell { min-width: 0; }
+.gal-grid .card.gal-gridcard { width: 100%; cursor: pointer; }
+.gal-grid .card-cap { color: var(--cream); background: rgba(0,0,0,.5); border-radius: 6px; padding: 2px 6px; max-width: 100%; }
+.gal-full { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; flex: 1; padding-top: 8px; }
+.card.gal-bigcard { width: min(70vw, 46vh, 340px); }
+.gal-cap { color: var(--cream); background: rgba(0,0,0,.55); border-radius: 8px; padding: 4px 12px; font-size: 1rem; max-width: 90vw; }
+.gal-nav { display: flex; gap: 16px; align-items: center; }
+.gal-arrow { font-size: 1.5rem; padding: 6px 18px; background: transparent; color: var(--cream); border-color: var(--cream); }
+.gal-pos { color: var(--cream-2); font-family: var(--type); font-size: .9rem; min-width: 70px; text-align: center; }
+.gal-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 4px; }
 
 /* ---------- toast ---------- */
 .toast {

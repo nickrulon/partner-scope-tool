@@ -293,7 +293,7 @@ console.log('\n== Doodles: own cards only, sanitized, clearable ==');
   applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: messy });
   const d = g.players[0].regular[0].doodle;
   ok(d.length <= 64, `stroke count capped at 64 (got ${d.length})`);
-  ok(d[0].c === 7 && d[0].w === 0, 'palette/weight indexes clamped (8-color palette)');
+  ok(d[0].c === 9 && d[0].w === 0, 'palette/weight indexes clamped (10-color palette)');
   ok(Math.min(...d[0].p) >= 0 && Math.max(...d[0].p) <= 1000, 'coordinates clamped to 0..1000');
   applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: [] });
   ok(!g.players[0].regular[0].doodle, 'empty strokes clears the doodle');
@@ -325,6 +325,55 @@ console.log('\n== Doodles carry into the next game (with or without names) ==');
   eq(doodled.length, 2, 'both doodles landed on fresh cards in the new deck');
   const withName = doodled.find((c) => c.kind === 'GEESE');
   ok(withName && withName.names && withName.names[0] === 'Moustachio', 'name and doodle stayed together');
+}
+
+console.log('\n== Doodle authorship: yer layer is yours, theirs is locked ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 81 });
+  g.players[0].regular = [{ id: 'g1', kind: 'GOOSE' }];
+  // A doodles (stamped acct_A via meta), then the card moves to B's hand.
+  applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: [{ c: 1, w: 1, p: [1, 1, 2, 2] }] }, { accountId: 'acct_A' });
+  eq(g.players[0].regular[0].doodle[0].by, 'acct_A', 'strokes are stamped with the author account');
+  g.players[1].regular = g.players[0].regular; g.players[0].regular = [];
+  // B saves their own layer (one stroke + an eraser stroke) — A's art survives.
+  applyAction(g, 'B', {
+    type: 'DOODLE_GOOSE', cardId: 'g1',
+    strokes: [{ c: 2, w: 0, p: [5, 5, 6, 6] }, { c: 0, w: 2, p: [7, 7, 8, 8], e: 1 }],
+  }, { accountId: 'acct_B' });
+  const d = g.players[1].regular[0].doodle;
+  ok(d.some((s) => s.by === 'acct_A'), "A's stroke survived B's save (protected)");
+  eq(d.filter((s) => s.by === 'acct_B').length, 2, "B's layer replaced with their two strokes");
+  ok(d.some((s) => s.e === 1), 'eraser strokes keep their e flag');
+  // B sends an empty layer ("Clear mine") — A's art still survives.
+  applyAction(g, 'B', { type: 'DOODLE_GOOSE', cardId: 'g1', strokes: [] }, { accountId: 'acct_B' });
+  ok(g.players[1].regular[0].doodle.some((s) => s.by === 'acct_A'), 'clearing your layer cannot wipe another goose\'s art');
+}
+
+console.log('\n== Great Honkeror carries its name AND doodle to the next game ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 82, honkerorHolderId: 'A' });
+  const hk = g.players[0].wild.find((c) => c.kind === 'GREAT_HONKEROR');
+  applyAction(g, 'A', { type: 'NAME_GOOSE', cardId: hk.id, names: ['His Majesty'] });
+  applyAction(g, 'A', { type: 'DOODLE_GOOSE', cardId: hk.id, strokes: [{ c: 7, w: 1, p: [10, 10, 20, 20] }] }, { accountId: 'acct_A' });
+  const carried = collectNames(g);
+  ok(carried.some((e) => e.kind === 'GREAT_HONKEROR'), 'Honkeror captured by collectNames');
+  const g2 = createGame(p('A', 'B'), { firstSeat: 0, seed: 83, honkerorHolderId: 'A', carryNames: carried });
+  const hk2 = g2.players[0].wild.find((c) => c.kind === 'GREAT_HONKEROR');
+  ok(hk2.names && hk2.names[0] === 'His Majesty', 'Honkeror kept its name in the next game');
+  ok(hk2.doodle && hk2.doodle.length === 1 && hk2.doodle[0].by === 'acct_A', 'Honkeror kept its doodle (with authorship) in the next game');
+}
+
+console.log('\n== Played wild cards keep decorations for the next game ==');
+{
+  const g = createGame(p('A', 'B'), { firstSeat: 0, seed: 84 });
+  giveWild(g, 'A', 'GOOSE_GANG');
+  const gang = g.players[0].wild[0];
+  gang.names = ['Blockius']; gang.doodle = [{ c: 3, w: 1, p: [1, 2, 3, 4], by: 'acct_A' }];
+  stackGoose(g, ['BIG_BOY']);
+  applyAction(g, 'A', { type: 'DRAW' });
+  applyAction(g, 'A', { type: 'RESPOND', response: 'goose_gang' });   // gang → wildDiscard
+  const carried = collectNames(g);
+  ok(carried.some((e) => e.kind === 'GOOSE_GANG' && e.names[0] === 'Blockius'), 'a PLAYED Goose Gang (wild discard) still carries its decorations');
 }
 
 console.log('\n== Named geese carry into the next game ==');

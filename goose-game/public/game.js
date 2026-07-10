@@ -4,7 +4,6 @@
 
 import {
   initAudio, playSound, enqueueSound, fxSound, drawSound, setMuted, isMuted, setVolume, getVolume,
-  startScribble, scribbleMove, stopScribble,
 } from './audio.js';
 
 const $ = (id) => document.getElementById(id);
@@ -487,7 +486,7 @@ function resetTransient(opts = {}) {
   $('overlay').classList.add('hidden');
   $('overlay').classList.remove('win');
   $('flyLayer').innerHTML = '';
-  document.querySelectorAll('.name-modal, .doodle-modal').forEach((m) => m.remove());
+  document.querySelectorAll('.name-modal, .doodle-modal, .deck-gallery').forEach((m) => m.remove());
   clearTimeout(laneTimer);
   winDismissed = false; laneBusy = false;
   tradeMode = false; tradeSel.clear(); targetMode = null; goosedChoosing = false;
@@ -804,6 +803,7 @@ function renderControls() {
     // After "View Board", keep Play Again (host) easy to reach, and let anyone
     // pop the winner screen back up.
     if (playerId === view.hostId) c.appendChild(btn('Play Again', 'btn-primary', () => sendWs('rematch')));
+    c.appendChild(btn('View the Deck', '', () => openDeckGallery()));
     c.appendChild(btn('View Winner', 'btn-ghost', () => { winDismissed = false; renderOverlay(); }));
     return;
   }
@@ -843,7 +843,7 @@ function openNameModal(cardId, onClose) {
   // One editor at a time: save-close any doodle editor, drop stale name modals.
   closeDoodleModals();
   document.querySelectorAll('.name-modal').forEach((m) => m.remove());
-  const done = () => { wrap.remove(); onClose && onClose(); };
+  const done = () => { wrap.remove(); syncDoodleSurface(); onClose && onClose(); };
   const card = (me().regular || []).find((c) => c.id === cardId)
     || (me().wild || []).find((c) => c.id === cardId);
   const max = card ? (NAME_MAX[card.kind] || 0) : 0;
@@ -890,6 +890,7 @@ function openNameModal(cardId, onClose) {
   // Click on the dim backdrop cancels.
   wrap.addEventListener('click', (e) => { if (e.target === wrap) done(); });
   document.body.appendChild(wrap);
+  syncDoodleSurface();   // naming = busy surface (the turn banner punches through)
   inputs[0] && inputs[0].focus();
 }
 
@@ -899,9 +900,10 @@ function openNameModal(cardId, onClose) {
 // stroke path. Seeded randomness keeps the grain identical across re-renders
 // (no shimmering) while still looking hand-waxed.
 // Palette: black, orange (game bill), red (game bad), green (game good),
-// blue, brown, yellow. Weights: light / medium / bold — default medium black.
-const DOODLE_COLORS = ['#2a2118', '#e07a2e', '#b23b2e', '#5d8a3a', '#3a6ea5', '#7a4a26', '#d9a62e', '#fdfdf8'];
-const DOODLE_COLOR_NAMES = ['black', 'orange', 'red', 'green', 'blue', 'brown', 'yellow', 'white'];
+// blue, brown, yellow, pink (dusty rose), purple (muted plum), white.
+// Weights: light / medium / bold — default medium black.
+const DOODLE_COLORS = ['#2a2118', '#e07a2e', '#b23b2e', '#5d8a3a', '#3a6ea5', '#7a4a26', '#d9a62e', '#c9748f', '#7a559e', '#fdfdf8'];
+const DOODLE_COLOR_NAMES = ['black', 'orange', 'red', 'green', 'blue', 'brown', 'yellow', 'pink', 'purple', 'white'];
 const BRUSH_R = [7, 12, 20];           // stroke radius at a 600px-wide card
 const DOODLE_MAX_POINTS = 1500;        // matches the engine's cap
 
@@ -956,12 +958,33 @@ function stampSegment(ctx, stroke, i, w, h, ox, oy, rnd) {
   }
 }
 
-// Render a full doodle (all strokes) onto any 2d context.
+// An eraser stroke (s.e) wipes pigment cleanly along its path — a smooth
+// round-capped line in destination-out compositing, sized by its weight.
+// No chunky section-drops: it behaves exactly like the crayon, in reverse.
+function eraseStrokePath(ctx, s, w, h, ox = 0, oy = 0) {
+  const r = BRUSH_R[s.w] * (w / 600);
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.strokeStyle = '#000';
+  ctx.fillStyle = '#000';
+  ctx.lineWidth = r * 2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(s.p[0] / 1000 * w + ox, s.p[1] / 1000 * h + oy);
+  for (let i = 2; i + 1 < s.p.length; i += 2) ctx.lineTo(s.p[i] / 1000 * w + ox, s.p[i + 1] / 1000 * h + oy);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Render a full doodle (all strokes, chronological) onto any 2d context.
+// Eraser strokes wipe whatever was painted before them in this sequence.
 function paintDoodle(ctx, strokes, w, h, ox = 0, oy = 0) {
   if (!Array.isArray(strokes)) return;
   ctx.save();
   strokes.forEach((s, si) => {
     if (!s || !Array.isArray(s.p) || s.p.length < 4) return;
+    if (s.e) { eraseStrokePath(ctx, s, w, h, ox, oy); return; }
     const rnd = srng(si * 7919 + s.p.length * 131 + s.c * 7 + s.w);
     // a dab at the very first point so single taps leave a mark
     const brush = brushFor(s.c, s.w, w);
@@ -971,13 +994,36 @@ function paintDoodle(ctx, strokes, w, h, ox = 0, oy = 0) {
   ctx.restore();
 }
 
+// Card doodles render in PER-ARTIST layers: each author's strokes (and their
+// erasers) live on their own layer, composited in order of first appearance.
+// An eraser therefore only ever wipes its own author's pigment — nobody can
+// remove another goose's art from a card, only draw over it.
+function paintDoodleLayered(ctx, strokes, w, h, ox = 0, oy = 0) {
+  if (!Array.isArray(strokes) || !strokes.length) return;
+  const order = [];
+  const groups = new Map();
+  for (const s of strokes) {
+    const k = s.by || '_legacy';
+    if (!groups.has(k)) { groups.set(k, []); order.push(k); }
+    groups.get(k).push(s);
+  }
+  if (order.length === 1) { paintDoodle(ctx, strokes, w, h, ox, oy); return; }
+  const cw = Math.max(1, Math.round(w)), ch = Math.max(1, Math.round(h));
+  for (const k of order) {
+    const off = document.createElement('canvas');
+    off.width = cw; off.height = ch;
+    paintDoodle(off.getContext('2d'), groups.get(k), cw, ch);
+    ctx.drawImage(off, ox, oy, w, h);
+  }
+}
+
 // Transparent canvas overlay that sits on a card face.
 function doodleLayer(doodle, res = 300) {
   const cv = document.createElement('canvas');
   cv.className = 'doodle-layer';
   cv.width = res;
   cv.height = Math.round(res * 4 / 3);
-  paintDoodle(cv.getContext('2d'), doodle, cv.width, cv.height);
+  paintDoodleLayered(cv.getContext('2d'), doodle, cv.width, cv.height);
   return cv;
 }
 
@@ -985,7 +1031,9 @@ function doodleLayer(doodle, res = 300) {
 // editor). While it's on AND it's your turn, the action buttons float above
 // the doodle UI with a "yer turn" chip so the table never waits on an artist.
 function syncDoodleSurface() {
-  const editorOpen = !!document.querySelector('.doodle-modal');
+  // Naming counts as a busy surface too — the your-turn banner must punch
+  // through the keyboard-covered name modal just like the doodle editors.
+  const editorOpen = !!document.querySelector('.doodle-modal, .name-modal');
   const on = pondMode || editorOpen;
   document.body.classList.toggle('doodling-surface', on);
   document.body.classList.toggle('card-editor-open', editorOpen);   // hides the pond toggle behind the editor
@@ -1047,29 +1095,18 @@ function openDoodleModal(cardId, onClose) {
     || (me().wild || []).find((c) => c.id === cardId);
   if (!card) { onClose && onClose(); return; }
   const meta = cardMeta[card.kind] || {};
-  const strokes = (card.doodle || []).map((s) => ({ c: s.c, w: s.w, p: s.p.slice() }));
+  // Two layers: other geese's art is the LOCKED BASE (ya can draw over it,
+  // never remove it); yer own strokes — plus legacy unstamped ones — are the
+  // editable top layer. The eraser only ever touches yer own layer.
+  const allStrokes = card.doodle || [];
+  const baseStrokes = allStrokes.filter((s) => s.by && s.by !== accountId);
+  const myStrokes = allStrokes
+    .filter((s) => !s.by || s.by === accountId)
+    .map((s) => ({ c: s.c, w: s.w, p: s.p.slice(), ...(s.e ? { e: 1 } : {}) }));
   let selColor = 0, selWeight = 1;   // default: medium black
   let selErase = false;              // eraser tool, sized by the weight setting
   let cur = null;
-  let totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0);
-
-  // Precision erase at (x,y): carve away just the touched parts of strokes,
-  // splitting them into surviving pieces — the crayon in reverse.
-  const eraseEditorAt = (x, y) => {
-    const rr0 = brushRNorm(selWeight);
-    let changed = false;
-    for (let i = strokes.length - 1; i >= 0; i--) {
-      const s = strokes[i];
-      const runs = carveRun(s.p, x, y, rr0 + brushRNorm(s.w) * 0.5);
-      if (runs.length === 1 && runs[0].length === s.p.length) continue;
-      changed = true;
-      strokes.splice(i, 1, ...runs.map((p) => ({ c: s.c, w: s.w, p })));
-    }
-    if (changed) {
-      totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0);
-      repaint();
-    }
-  };
+  let totalPts = myStrokes.reduce((n, s) => n + s.p.length / 2, 0);
 
   const wrap = document.createElement('div');
   wrap.className = 'overlay doodle-modal';
@@ -1091,8 +1128,39 @@ function openDoodleModal(cardId, onClose) {
   stage.appendChild(cv);
   box.appendChild(stage);
 
-  const repaint = () => { ctx.clearRect(0, 0, cv.width, cv.height); paintDoodle(ctx, strokes, cv.width, cv.height); };
+  // Offscreen layers: base (others' art, painted once) + mine (repainted).
+  const baseCv = document.createElement('canvas');
+  baseCv.width = 600; baseCv.height = 800;
+  paintDoodleLayered(baseCv.getContext('2d'), baseStrokes, 600, 800);
+  const mineCv = document.createElement('canvas');
+  mineCv.width = 600; mineCv.height = 800;
+  const mctx = mineCv.getContext('2d');
+  const composite = () => {
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(baseCv, 0, 0);
+    ctx.drawImage(mineCv, 0, 0);
+  };
+  const repaint = () => {
+    mctx.clearRect(0, 0, mineCv.width, mineCv.height);
+    paintDoodle(mctx, myStrokes, mineCv.width, mineCv.height);
+    composite();
+  };
   repaint();
+
+  // Live eraser segment: clean round line, destination-out, on MY layer only.
+  const eraseSeg = (x0, y0, x1, y1) => {
+    const r = BRUSH_R[selWeight];
+    mctx.save();
+    mctx.globalCompositeOperation = 'destination-out';
+    mctx.strokeStyle = '#000'; mctx.fillStyle = '#000';
+    mctx.lineWidth = r * 2; mctx.lineCap = 'round'; mctx.lineJoin = 'round';
+    mctx.beginPath();
+    mctx.moveTo(x0 / 1000 * 600, y0 / 1000 * 800);
+    mctx.lineTo(x1 / 1000 * 600, y1 / 1000 * 800);
+    mctx.stroke();
+    mctx.restore();
+    composite();
+  };
 
   // --- tools ---
   const tools = document.createElement('div');
@@ -1128,8 +1196,9 @@ function openDoodleModal(cardId, onClose) {
     weights.appendChild(b);
   });
   weights.appendChild(btn('Eraser', 'btn-ghost dd-mini dd-eraser', () => setEditorErase(!selErase)));
-  const undo = btn('Undo', 'btn-ghost dd-mini', () => { strokes.pop(); totalPts = strokes.reduce((n, s) => n + s.p.length / 2, 0); repaint(); });
-  const clear = btn('Clear all', 'btn-ghost dd-mini', () => { strokes.length = 0; totalPts = 0; repaint(); });
+  const undo = btn('Undo', 'btn-ghost dd-mini', () => { myStrokes.pop(); totalPts = myStrokes.reduce((n, s) => n + s.p.length / 2, 0); repaint(); });
+  // Clear only wipes YOUR layer — other geese's art on this card is protected.
+  const clear = btn(baseStrokes.length ? 'Clear mine' : 'Clear all', 'btn-ghost dd-mini', () => { myStrokes.length = 0; totalPts = 0; repaint(); });
   weights.appendChild(undo);
   weights.appendChild(clear);
   tools.appendChild(weights);
@@ -1144,41 +1213,39 @@ function openDoodleModal(cardId, onClose) {
     ];
   };
   cv.addEventListener('pointerdown', (e) => {
-    if (selErase) {
-      e.preventDefault();
-      try { cv.setPointerCapture(e.pointerId); } catch { /* synthetic */ }
-      cur = { erasing: true };
-      const [ex, ey] = toXY(e);
-      eraseEditorAt(ex, ey);
-      return;
-    }
-    if (strokes.length >= 64 || totalPts >= DOODLE_MAX_POINTS) { toast('Yer crayon is worn down to a nub! (undo something)'); return; }
+    if (myStrokes.length >= 64 || totalPts >= DOODLE_MAX_POINTS) { toast('Yer crayon is worn down to a nub! (undo something)'); return; }
     e.preventDefault();
     try { cv.setPointerCapture(e.pointerId); } catch { /* synthetic events have no active pointer */ }
     const [x, y] = toXY(e);
+    if (selErase) {
+      // An eraser stroke — recorded just like a crayon stroke, rendered as a
+      // clean weight-sized wipe of YOUR pigment.
+      cur = { e: 1, c: 0, w: selWeight, p: [x, y] };
+      eraseSeg(x, y, x, y);
+      return;
+    }
     cur = { c: selColor, w: selWeight, p: [x, y] };
-    const brush = brushFor(selColor, selWeight, cv.width);
-    ctx.drawImage(brush, x / 1000 * cv.width - brush.width / 2, y / 1000 * cv.height - brush.width / 2);
-    startScribble();   // paper-scratch loop, silent until the crayon moves
+    const brush = brushFor(selColor, selWeight, mineCv.width);
+    mctx.drawImage(brush, x / 1000 * mineCv.width - brush.width / 2, y / 1000 * mineCv.height - brush.width / 2);
+    composite();
   });
   cv.addEventListener('pointermove', (e) => {
     if (!cur) return;
     e.preventDefault();
-    if (cur.erasing) { const [ex, ey] = toXY(e); eraseEditorAt(ex, ey); return; }
     const [x, y] = toXY(e);
     const n = cur.p.length;
     if (Math.hypot(x - cur.p[n - 2], y - cur.p[n - 1]) < 7) return;   // thin dense points
     if (totalPts + cur.p.length / 2 >= DOODLE_MAX_POINTS) return;
+    const [px, py] = [cur.p[n - 2], cur.p[n - 1]];
     cur.p.push(x, y);
+    if (cur.e) { eraseSeg(px, py, x, y); return; }
     // live stamp (Math.random jitter is fine mid-stroke; repaint on release is seeded)
-    stampSegment(ctx, cur, cur.p.length - 2, cv.width, cv.height, 0, 0, Math.random);
-    scribbleMove();
+    stampSegment(mctx, cur, cur.p.length - 2, mineCv.width, mineCv.height, 0, 0, Math.random);
+    composite();
   });
   const endStroke = () => {
-    stopScribble();
     if (!cur) return;
-    if (cur.erasing) { cur = null; return; }   // erase repaints as it goes
-    if (cur.p.length >= 4) { strokes.push(cur); totalPts += cur.p.length / 2; }
+    if (cur.p.length >= 4) { myStrokes.push(cur); totalPts += cur.p.length / 2; }
     cur = null;
     repaint();
   };
@@ -1186,8 +1253,10 @@ function openDoodleModal(cardId, onClose) {
   cv.addEventListener('pointercancel', endStroke);
 
   // --- actions ---
-  const done = () => { stopScribble(); wrap.remove(); syncDoodleSurface(); onClose && onClose(); };
-  const save = () => { sendWs('action', { action: { type: 'DOODLE_GOOSE', cardId, strokes } }); done(); };
+  const done = () => { wrap.remove(); syncDoodleSurface(); onClose && onClose(); };
+  // Only YOUR layer is sent — the server preserves other geese's strokes
+  // verbatim and stamps yours with your account, enforcing the protection.
+  const save = () => { sendWs('action', { action: { type: 'DOODLE_GOOSE', cardId, strokes: myStrokes } }); done(); };
   wrap.__forceClose = save;   // turn actions save-and-close rather than discard
   const row = document.createElement('div');
   row.className = 'dd-actions';
@@ -1212,8 +1281,8 @@ let pondMode = false, pondColor = 0, pondWeight = 1, pondCur = null;
 // Set when a turn action (trade, lawn mower) needs the table back — marker
 // mode suspends for the transaction and resumes right after.
 let pondResume = false;
-// Eraser tool: carves away just the parts of strokes it passes over
-// (anyone's — same social contract as doodling over someone's art).
+// Eraser tool: a clean weight-sized wipe stroke (anyone's marks — same
+// social contract as doodling over someone's art).
 let pondErase = false;
 // Other players' in-progress strokes (streamed live), keyed by player id.
 const pondLive = {};
@@ -1304,7 +1373,10 @@ function pondZoneEls() {
     add('myhand', document.querySelector('.myhand'));
     document.querySelectorAll('#players .player').forEach((p) => add('player:' + p.dataset.pid, p));
   } else if (screen === 'waiting') {
+    // Card first (hit-test priority), then the green background — the whole
+    // waiting room is doodleable.
     add('waitcard', document.querySelector('#waiting .lobby-card'));
+    add('waitbg', $('waiting'));
   }
   return out;
 }
@@ -1323,21 +1395,12 @@ function pondCanvasFor(el) {
 // idempotent — called after any render that rebuilds a zone's DOM.
 function renderPond() {
   if (!view || !view.code || !doodleScreen()) return;
-  // Drop carve overlays the server has confirmed, and stale live previews.
+  // Drop stale live previews.
   const stored = (view.pond || []);
-  for (const id of [...pondCarves.keys()]) if (!stored.some((s) => s.i === id)) pondCarves.delete(id);
   const now = Date.now();
   for (const [by, s] of Object.entries(pondLive)) if (now - s.t > 6000) delete pondLive[by];
   const byZone = {};
-  stored.forEach((s) => {
-    const bucket = (byZone[s.z] = byZone[s.z] || []);
-    if (pondCarves.has(s.i)) {
-      // Mid-erase (or awaiting the server): draw the surviving pieces instead.
-      for (const p of pondCarves.get(s.i)) bucket.push({ ...s, p });
-    } else {
-      bucket.push(s);
-    }
-  });
+  stored.forEach((s) => { (byZone[s.z] = byZone[s.z] || []).push(s); });
   Object.values(pondLive).forEach((s) => { (byZone[s.z] = byZone[s.z] || []).push(s); });
   for (const [zone, el] of pondZoneEls()) {
     const strokes = byZone[zone];
@@ -1367,7 +1430,6 @@ const pondXY = (e, r) => [
 function setPondMode(on) {
   pondMode = on;
   pondCur = null;
-  stopScribble();
   if (!on) pondResume = false;
   document.body.classList.toggle('pond-mode', on);
   $('pondCapture').classList.toggle('hidden', !on);
@@ -1435,59 +1497,29 @@ function buildPondBar() {
 
 $('pondBtn').onclick = () => { playSound('click'); setPondMode(!pondMode); };
 
-// The PRECISION eraser: it behaves like the crayon in reverse — its tip is
-// sized by the selected weight (light/medium/bold), and it removes only the
-// bits of a stroke it actually passes over, splitting strokes into the
-// surviving pieces rather than deleting them whole.
-const brushRNorm = (w) => BRUSH_R[w] * (1000 / 600);   // brush radius in zone-normalized units
+// The pond eraser is a STROKE, same as the crayon: recorded as {e:1, w, p}
+// and rendered as a clean, round-capped, weight-sized wipe (destination-out)
+// of everything painted before it in that zone. Smooth like a brush — no
+// chunky section-drops. On the shared pond, anyone can erase anything (same
+// social contract as doodling over someone's art).
 
-// Carve one point-run: remove points within radius rr of (x,y); return the
-// surviving runs (each needs ≥2 points to remain a drawable stroke).
-function carveRun(p, x, y, rr) {
-  const runs = [];
-  let run = [];
-  const flush = () => { if (run.length >= 4) runs.push(run); run = []; };
-  for (let i = 0; i + 1 < p.length; i += 2) {
-    if (Math.hypot(p[i] - x, p[i + 1] - y) < rr) flush();
-    else run.push(p[i], p[i + 1]);
-  }
-  flush();
-  return runs;
-}
-
-// Local carve state during an eraser drag: stroke id → its current surviving
-// runs. Rendered immediately (renderPond substitutes these), then sent to the
-// server as `carve` ops on release.
-const pondCarves = new Map();
-
-function eraseAt(e) {
-  const hit = zoneAt(e.clientX, e.clientY);
-  if (!hit) return;
-  const [x, y] = pondXY(e, hit.r);
-  const eraseR = brushRNorm(pondWeight);
-  for (const s of (view.pond || [])) {
-    if (s.z !== hit.z || s.i == null) continue;
-    const rr = eraseR + brushRNorm(s.w) * 0.5;   // eraser tip meets crayon edge
-    const runs = pondCarves.has(s.i) ? pondCarves.get(s.i) : [s.p];
-    let changed = false;
-    const next = [];
-    for (const run of runs) {
-      const carved = carveRun(run, x, y, rr);
-      if (carved.length !== 1 || carved[0].length !== run.length) changed = true;
-      next.push(...carved);
-    }
-    if (changed || pondCarves.has(s.i)) pondCarves.set(s.i, next);
-  }
-  renderPond();
-}
-
-// On release: tell the server what survived of each touched stroke.
-function flushCarves() {
-  for (const [id, parts] of pondCarves) {
-    sendWs('pond', { op: 'carve', id, parts });
-  }
-  // Keep entries until the broadcast replaces the originals (renderPond drops
-  // an entry the moment its original id disappears from the stored pond).
+// Live wipe of one segment directly on a zone's canvas while dragging.
+function pondEraseSeg(el, w, x0, y0, x1, y1) {
+  const cv = pondCanvasFor(el);
+  if (!cv) return;
+  const c2 = cv.getContext('2d');
+  const r = BRUSH_R[w] * (cv.width / 600);
+  c2.save();
+  c2.globalCompositeOperation = 'destination-out';
+  c2.strokeStyle = '#000';
+  c2.lineWidth = r * 2;
+  c2.lineCap = 'round';
+  c2.lineJoin = 'round';
+  c2.beginPath();
+  c2.moveTo(x0 / 1000 * cv.width, y0 / 1000 * cv.height);
+  c2.lineTo(x1 / 1000 * cv.width, y1 / 1000 * cv.height);
+  c2.stroke();
+  c2.restore();
 }
 
 // Drawing on the capture layer: the stroke belongs to whichever zone it
@@ -1499,45 +1531,46 @@ function flushCarves() {
     const now = Date.now();
     if (now - pondLiveLastSent < 100) return;   // ~10Hz is plenty for a crayon
     pondLiveLastSent = now;
-    sendWs('pond', { op: 'live', stroke: { z: pondCur.zone, c: pondCur.s.c, w: pondCur.s.w, p: pondCur.s.p } });
+    sendWs('pond', { op: 'live', stroke: { z: pondCur.zone, c: pondCur.s.c, w: pondCur.s.w, p: pondCur.s.p, ...(pondCur.s.e ? { e: 1 } : {}) } });
   };
   cap.addEventListener('pointerdown', (e) => {
-    if (pondErase) { e.preventDefault(); try { cap.setPointerCapture(e.pointerId); } catch { /* synthetic */ } pondCur = { erasing: true }; eraseAt(e); return; }
     const hit = zoneAt(e.clientX, e.clientY);
-    if (!hit) { toast(doodleScreen() === 'waiting' ? 'Doodle on the big paper card.' : 'Doodle on a box — the play table, decks, or a player panel.'); return; }
+    if (!hit) { toast(doodleScreen() === 'waiting' ? 'Doodle anywhere on the waitin\' room.' : 'Doodle on a box — the play table, decks, or a player panel.'); return; }
     e.preventDefault();
     try { cap.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
     const [x, y] = pondXY(e, hit.r);
+    if (pondErase) {
+      // Eraser stroke: same shape as a crayon stroke, flagged e:1.
+      pondCur = { zone: hit.z, el: hit.el, r: hit.r, s: { e: 1, c: 0, w: pondWeight, p: [x, y] } };
+      pondEraseSeg(hit.el, pondWeight, x, y, x, y);
+      return;
+    }
     pondCur = { zone: hit.z, el: hit.el, r: hit.r, s: { c: pondColor, w: pondWeight, p: [x, y] } };
     const cv = pondCanvasFor(hit.el);
     if (cv) {
       const brush = brushFor(pondColor, pondWeight, cv.width);
       cv.getContext('2d').drawImage(brush, x / 1000 * cv.width - brush.width / 2, y / 1000 * cv.height - brush.width / 2);
     }
-    startScribble();   // paper-scratch loop, silent until the crayon moves
   });
   cap.addEventListener('pointermove', (e) => {
     if (!pondCur) return;
     e.preventDefault();
-    if (pondCur.erasing) { eraseAt(e); return; }
     const [x, y] = pondXY(e, pondCur.r);
     const n = pondCur.s.p.length;
     if (Math.hypot(x - pondCur.s.p[n - 2], y - pondCur.s.p[n - 1]) < 7) return;
     if (n / 2 >= 1200) return;
+    const [px, py] = [pondCur.s.p[n - 2], pondCur.s.p[n - 1]];
     pondCur.s.p.push(x, y);
+    if (pondCur.s.e) { pondEraseSeg(pondCur.el, pondCur.s.w, px, py, x, y); streamLive(); return; }
     const cv = pondCanvasFor(pondCur.el);
     if (cv) stampSegment(cv.getContext('2d'), pondCur.s, pondCur.s.p.length - 2, cv.width, cv.height, 0, 0, Math.random);
-    scribbleMove();
     streamLive();
   });
   const end = () => {
-    stopScribble();
     if (!pondCur) return;
-    const wasErasing = pondCur.erasing;
     const { zone, s } = pondCur;
     pondCur = null;
-    if (wasErasing) { flushCarves(); return; }
-    if (s.p.length >= 4) sendWs('pond', { op: 'stroke', stroke: { z: zone, c: s.c, w: s.w, p: s.p } });
+    if (s.p.length >= 4) sendWs('pond', { op: 'stroke', stroke: { z: zone, c: s.c, w: s.w, p: s.p, ...(s.e ? { e: 1 } : {}) } });
     else { sendWs('pond', { op: 'live', stroke: null }); renderPond(); }   // tell others the preview is over
   };
   cap.addEventListener('pointerup', end);
@@ -1660,7 +1693,7 @@ async function downloadWinImage(w, win) {
     }
     if (Array.isArray(c.doodle) && c.doodle.length) {
       ctx.save(); roundRectPath(ctx, x, y, cardW, cardH, r); ctx.clip();
-      paintDoodle(ctx, c.doodle, cardW, cardH, x, y);
+      paintDoodleLayered(ctx, c.doodle, cardW, cardH, x, y);
       ctx.restore();
     }
     ctx.strokeStyle = '#2a2118'; ctx.lineWidth = Math.max(3, cardW * 0.02);
@@ -1690,6 +1723,222 @@ async function downloadWinImage(w, win) {
   a.href = dataUrl;
   a.download = `winning-gaggle-${(w.name || 'goose').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
   document.body.appendChild(a); a.click(); a.remove();
+}
+
+// ---- the deck gallery (end of game) ----
+// Flip through EVERY card in both decks — the doodled, named geese first —
+// swipe one at a time or browse the grid, and save keepsakes as images.
+
+// Deliver rendered canvases: mobile gets a press-hold window (opened in the
+// click gesture), desktop falls back to real downloads.
+function deliverImages(win, canvases, title, filenamePrefix) {
+  const urls = [];
+  try { canvases.forEach((cv) => urls.push(cv.toDataURL('image/png'))); }
+  catch { if (win) win.close(); toast('Could not make the image on this browser.'); return; }
+  if (win && !win.closed) {
+    try {
+      win.document.title = title;
+      win.document.body.style.cssText = 'margin:0;background:#163026;display:flex;flex-direction:column;align-items:center;font-family:Georgia,serif';
+      win.document.body.innerHTML =
+        `<p style="color:#f1e7cf;margin:14px 12px;text-align:center;font-size:15px">Press &amp; hold ${urls.length > 1 ? 'each image' : 'the image'} to save to your photos.</p>` +
+        urls.map((u, i) => `<img src="${u}" alt="${title} ${i + 1}" style="display:block;width:100%;max-width:540px;height:auto;margin-bottom:14px" />`).join('');
+      return;
+    } catch { /* fall through to downloads */ }
+  }
+  urls.forEach((u, i) => {
+    const a = document.createElement('a');
+    a.href = u;
+    a.download = `${filenamePrefix}${urls.length > 1 ? `-${i + 1}` : ''}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+}
+
+// Render one card to a canvas: art, doodles (author-layered), names plate.
+async function renderCardCanvas(c, W = 750) {
+  const H = Math.round(W * 4 / 3);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H + (c.names && c.names.length ? Math.round(W * 0.14) : 0);
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#163026';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  const r = Math.round(W * 0.04);
+  ctx.fillStyle = '#f1e7cf';
+  roundRectPath(ctx, 0, 0, W, H, r); ctx.fill();
+  const im = hasArt(c.kind) ? await loadImg(artUrl[c.kind]) : null;
+  ctx.save(); roundRectPath(ctx, 0, 0, W, H, r); ctx.clip();
+  if (im) drawCover(ctx, im, 0, 0, W, H);
+  else { ctx.fillStyle = cardMeta[c.kind]?.color || '#6b8e23'; ctx.fillRect(0, 0, W, H); }
+  if (c.doodle && c.doodle.length) paintDoodleLayered(ctx, c.doodle, W, H);
+  ctx.restore();
+  ctx.strokeStyle = '#2a2118'; ctx.lineWidth = Math.max(4, W * 0.012);
+  roundRectPath(ctx, 2, 2, W - 4, H - 4, r); ctx.stroke();
+  if (c.names && c.names.length) {
+    ctx.fillStyle = '#f1e7cf';
+    ctx.textAlign = 'center';
+    fitFont(ctx, c.names.join(' · '), Math.round(W * 0.075), W - 24, 'Georgia, serif');
+    ctx.fillText(c.names.join(' · '), W / 2, H + Math.round(W * 0.095));
+  }
+  return cv;
+}
+
+const isDecorated = (c) => (c.doodle && c.doodle.length) || (c.names && c.names.length);
+
+// Sorted view of the deck for one tab: decorated cards first.
+function galleryList(tab) {
+  const deck = (view.game && view.game.deck) || [];
+  const inTab = deck.filter((c) => (cardMeta[c.kind]?.deck || 'goose') === tab);
+  return [...inTab.filter(isDecorated), ...inTab.filter((c) => !isDecorated(c))];
+}
+
+function openDeckGallery() {
+  document.querySelectorAll('.deck-gallery').forEach((m) => m.remove());
+  let tab = 'goose';
+  let viewing = -1;   // -1 = grid; otherwise fullscreen index
+
+  const wrap = document.createElement('div');
+  wrap.className = 'overlay deck-gallery';
+  const box = document.createElement('div');
+  box.className = 'gal-box';
+  wrap.appendChild(box);
+
+  const render = () => {
+    const list = galleryList(tab);
+    box.innerHTML = '';
+
+    if (viewing >= 0 && list[viewing]) {
+      // --- fullscreen, one card at a time, swipe left/right ---
+      const c = list[viewing];
+      const stagePad = document.createElement('div');
+      stagePad.className = 'gal-full';
+      const slot = document.createElement('div');
+      slot.className = 'card-slot';
+      const el = cardEl(c, false);
+      el.classList.add('gal-bigcard');
+      slot.appendChild(el);
+      if (c.names && c.names.length) {
+        const cap = document.createElement('div');
+        cap.className = 'card-cap gal-cap';
+        cap.textContent = c.names.join(' · ');
+        slot.appendChild(cap);
+      }
+      stagePad.appendChild(slot);
+      const nav = document.createElement('div');
+      nav.className = 'gal-nav';
+      nav.appendChild(btn('‹', 'gal-arrow', () => { viewing = (viewing - 1 + list.length) % list.length; render(); }));
+      const pos = document.createElement('span');
+      pos.className = 'gal-pos';
+      pos.textContent = `${viewing + 1} / ${list.length}`;
+      nav.appendChild(pos);
+      nav.appendChild(btn('›', 'gal-arrow', () => { viewing = (viewing + 1) % list.length; render(); }));
+      stagePad.appendChild(nav);
+      const row = document.createElement('div');
+      row.className = 'gal-actions';
+      row.appendChild(btn('Save this card', 'btn-primary', () => {
+        const win = window.open('about:blank', '_blank');
+        renderCardCanvas(c).then((cv) => deliverImages(win, [cv], 'Goose Card', `goose-card-${viewing + 1}`));
+      }));
+      row.appendChild(btn('Back to the deck', 'btn-ghost', () => { viewing = -1; render(); }));
+      stagePad.appendChild(row);
+      box.appendChild(stagePad);
+      // swipe
+      let sx = null;
+      stagePad.addEventListener('pointerdown', (e) => { if (!e.target.closest('.btn')) sx = e.clientX; });
+      stagePad.addEventListener('pointerup', (e) => {
+        if (sx == null) return;
+        const dx = e.clientX - sx; sx = null;
+        if (Math.abs(dx) < 40) return;
+        viewing = (viewing + (dx < 0 ? 1 : -1) + list.length) % list.length;
+        render();
+      });
+      return;
+    }
+
+    // --- grid view ---
+    const head = document.createElement('div');
+    head.className = 'gal-head';
+    head.innerHTML = '<div class="gal-title">The Deck</div><div class="gal-sub">doodled &amp; named geese up top — tap a card to flip through</div>';
+    box.appendChild(head);
+    const tabs = document.createElement('div');
+    tabs.className = 'gal-tabs';
+    [['goose', 'Goose Deck'], ['wild', 'Wild Deck']].forEach(([key, label]) => {
+      const t = btn(label, 'gal-tab' + (tab === key ? ' sel' : ''), () => { tab = key; viewing = -1; render(); });
+      tabs.appendChild(t);
+    });
+    box.appendChild(tabs);
+    const grid = document.createElement('div');
+    grid.className = 'gal-grid';
+    list.forEach((c, i) => {
+      const slot = document.createElement('div');
+      slot.className = 'card-slot gal-cell';
+      const el = cardEl(c, false);
+      el.classList.add('gal-gridcard');
+      el.onclick = () => { playSound('click'); viewing = i; render(); };
+      slot.appendChild(el);
+      if (c.names && c.names.length) {
+        const cap = document.createElement('div');
+        cap.className = 'card-cap gal-cap';
+        cap.textContent = c.names.join(' · ');
+        slot.appendChild(cap);
+      }
+      grid.appendChild(slot);
+    });
+    box.appendChild(grid);
+    const row = document.createElement('div');
+    row.className = 'gal-actions';
+    row.appendChild(btn('Save the deck (doodled & named)', '', () => {
+      const keepers = [...galleryList('goose'), ...galleryList('wild')].filter(isDecorated);
+      if (!keepers.length) { toast('Nothin\' doodled or named this time — mark up yer geese next game!'); return; }
+      const win = window.open('about:blank', '_blank');
+      saveDeckPages(keepers, win);
+    }));
+    row.appendChild(btn('Close', 'btn-ghost', () => wrap.remove()));
+    box.appendChild(row);
+  };
+
+  render();
+  wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+
+// Page the keepsake cards 3×5 onto tall images (as many pages as it takes).
+async function saveDeckPages(cards, win) {
+  const COLS = 3, ROWS = 5, PER = COLS * ROWS;
+  const W = 1080, margin = 36, gap = 24;
+  const cardW = Math.floor((W - margin * 2 - gap * (COLS - 1)) / COLS);
+  const cardH = Math.round(cardW * 4 / 3), nameH = 44;
+  const pitch = cardH + nameH + gap;
+  const pages = [];
+  for (let p = 0; p < cards.length; p += PER) {
+    const batch = cards.slice(p, p + PER);
+    const rows = Math.ceil(batch.length / COLS);
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = margin * 2 + rows * pitch;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#163026';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    for (let i = 0; i < batch.length; i++) {
+      const c = batch[i];
+      const x = margin + (i % COLS) * (cardW + gap);
+      const y = margin + Math.floor(i / COLS) * pitch;
+      const r = Math.max(8, cardW * 0.05);
+      const im = hasArt(c.kind) ? await loadImg(artUrl[c.kind]) : null;
+      ctx.save(); roundRectPath(ctx, x, y, cardW, cardH, r); ctx.clip();
+      if (im) drawCover(ctx, im, x, y, cardW, cardH);
+      else { ctx.fillStyle = cardMeta[c.kind]?.color || '#6b8e23'; ctx.fillRect(x, y, cardW, cardH); }
+      if (c.doodle && c.doodle.length) paintDoodleLayered(ctx, c.doodle, cardW, cardH, x, y);
+      ctx.restore();
+      ctx.strokeStyle = '#2a2118'; ctx.lineWidth = 4;
+      roundRectPath(ctx, x, y, cardW, cardH, r); ctx.stroke();
+      if (c.names && c.names.length) {
+        ctx.fillStyle = '#f1e7cf';
+        ctx.textAlign = 'center';
+        fitFont(ctx, c.names.join(' · '), 30, cardW + gap - 8, 'Georgia, serif');
+        ctx.fillText(c.names.join(' · '), x + cardW / 2, y + cardH + nameH * 0.7);
+      }
+    }
+    pages.push(cv);
+  }
+  deliverImages(win, pages, 'The Deck', 'goose-deck');
 }
 
 let winDismissed = false;
@@ -1722,6 +1971,7 @@ function renderOverlay() {
       saveBtn.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:7px"><path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>Save Gaggle';
       cc.appendChild(saveBtn);
     }
+    cc.appendChild(btn('View the Deck', '', () => openDeckGallery()));
     cc.appendChild(btn('View Board', 'btn-ghost', () => { winDismissed = true; renderOverlay(); }));
     return;
   }
@@ -1760,13 +2010,24 @@ function renderOverlay() {
   const targetName = g.players.find((p) => p.id === g.pending.targetId)?.name || '';
   cc.innerHTML = '';
 
+  // The intel strip: every goose's CARD count (regular hand), so a Get Goosed
+  // can be aimed with eyes open instead of from memory.
+  const counts = document.createElement('div');
+  counts.className = 'threat-counts';
+  counts.innerHTML = g.players
+    .filter((o) => !o.removed)
+    .map((o) => `<span class="tc-chip${o.id === playerId ? ' me' : ''}">${esc(o.name)}: <strong>${o.regularCount}</strong> card${o.regularCount === 1 ? '' : 's'}</span>`)
+    .join('');
+  cc.appendChild(counts);
+
   if (!amTarget) { cc.appendChild(msg(`Big Boy is after ${esc(targetName)}…`)); return; }
 
   if (goosedChoosing) {
     cc.appendChild(msg('Send Big Boy at…'));
     for (const o of g.players) {
       if (o.id === playerId || o.removed) continue;   // gone geese can't take the hit
-      cc.appendChild(btn(o.name + (o.connected ? '' : ' (away)'), '', () => { goosedChoosing = false; respond('get_goosed', o.id); }));
+      const label = `${o.name} — ${o.regularCount} card${o.regularCount === 1 ? '' : 's'}${o.connected ? '' : ' (away)'}`;
+      cc.appendChild(btn(label, '', () => { goosedChoosing = false; respond('get_goosed', o.id); }));
     }
     cc.appendChild(btn('Back', 'btn-ghost', () => { goosedChoosing = false; renderOverlay(); }));
     return;
@@ -2107,7 +2368,12 @@ function addChat(from, text) {
 function btn(label, cls, fn, opts = {}) {
   const b = document.createElement('button');
   b.className = 'btn ' + (cls || '');
-  b.textContent = label;
+  // Label rides in a span so it can float above crayon strokes in doodleable
+  // zones (the button's background gets drawn on; its text never does).
+  const span = document.createElement('span');
+  span.className = 'btn-label';
+  span.textContent = label;
+  b.appendChild(span);
   // seqClick routes the click into the sequential queue (used by Draw) so it
   // leads the click→draw→turn chain instead of overlapping it.
   b.onclick = () => { opts.seqClick ? enqueueSound('click') : playSound('click'); fn(); };
